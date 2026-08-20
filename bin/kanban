@@ -317,9 +317,57 @@ def cmd_init(args) -> int:
     root = Path(args[0]).resolve() if args else board_root()
     ensure_board(root)
     _exclude_board(root)
+    _write_board_templates(root)
     print(f"看板就绪: {root}")
     print("状态目录: " + ", ".join(STATES))
     return 0
+
+
+BOARD_CONFIG_TEMPLATE = """# 看板配置 (kanban/.dsh-onevoke.yml) — 本看板的模型/审核/权限设置
+# 优先级: 会话 /model > 本项目配置 > home (~/.dsh/onevoke/reviewers.yml) > 会话默认
+# 全部注释 = 用默认; 需要时取消注释并修改 (模型名需已注册的 provider 支持).
+# model:                    # 执行模型 (kanban start 自动 /model 切换)
+#   provider: deepseek-official
+#   model: deepseek-v4-flash
+# plan:                     # 规划模型 (主会话建议, 手动 /model)
+#   provider: deepseek-official
+#   model: deepseek-v4-flash
+# review:                   # 审核通用模型
+#   provider: deepseek-official
+#   model: deepseek-v4-flash
+# reviewers:                # 审核按角色 (高于 review)
+#   PM: { provider: pi-ai, model: deepseek-v4-pro }
+#   QA: { provider: deepseek-official, model: deepseek-v4-flash }
+#   CSA: { provider: deepseek-official, model: deepseek-v4-flash }
+#   Hacker: { provider: deepseek-official, model: deepseek-v4-flash }
+# permission:               # 任务会话沙箱 (默认 danger-full-access)
+#   mode: workspace-write
+"""
+
+BOARD_RULES_TEMPLATE = """# 本看板项目规则 (kanban/RULES.md)
+
+本文件是项目级规则补充, 任务 Agent 开工时先读它。
+优先级: 当前任务用户指令 > 本文件 > onevoke 技能(全局) > 项目 AGENTS.md。
+
+为本项目写特定约定, 例如:
+- 分支命名: task-<slug>
+- 提交信息: 中文动宾短语
+- 禁止事项: 不引入非标准库依赖 / 不动 xxx 模块
+- 技术栈与目录约定
+- 测试要求
+
+不需要时保持本文件为空或删除即可。
+"""
+
+
+def _write_board_templates(root: Path) -> None:
+    """kanban init 生成看板配置模板 (仅当不存在, 幂等)."""
+    for name, content in ((".dsh-onevoke.yml", BOARD_CONFIG_TEMPLATE),
+                          ("RULES.md", BOARD_RULES_TEMPLATE)):
+        p = root / name
+        if not p.exists():
+            p.write_text(content, encoding="utf-8")
+            print(f"已生成模板: {p} (注释掉即默认, 按需修改)")
 
 
 def cmd_list(args) -> int:
@@ -494,12 +542,15 @@ def resolve_dsh() -> list:
 
 
 def task_prompt(task_id: str, title: str, entry: Path) -> str:
+    rules = entry.parent.parent / "RULES.md"
+    rules_note = f" 若 {rules} 存在, 先读它(项目看板规则, 优先级高于通用技能)。" if rules.exists() else ""
     return (
         f"看板任务 {task_id} - {title}。"
         f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
         f"然后按技能流程实现该任务 (worktree + 分支 + 提交 + 审核 + 请求验收)。"
         f"本任务在独立会话中执行; 会话恢复 id 见 TUI 退出提示, 结束时把它记入卡片"
         f"「讨论与决策」(格式: 会话: <id>)。"
+        + rules_note
     )
 
 
@@ -585,25 +636,13 @@ def _tmux_window_index(win: str):
 
 
 def _find_project_config() -> Path:
-    """定位项目配置, 优先级:
-      1) <看板目录>/.dsh-onevoke.yml (本地跟随看板; kanban/ 本来就排除 git, 天然个人)
-      2) 从当前目录向上找项目根 .dsh-onevoke.yml (可提交 git 团队共享)
-    返回 Path 或 None."""
+    """项目配置固定在看板目录内: kanban/.dsh-onevoke.yml (跟随看板, 本地).
+    不做项目根查找 — 配置归属看板, 一个位置更清晰."""
     try:
-        board = board_root() / ".dsh-onevoke.yml"
-        if board.is_file():
-            return board
+        f = board_root() / ".dsh-onevoke.yml"
+        return f if f.is_file() else None
     except Exception:
-        pass
-    d = Path.cwd()
-    for _ in range(6):
-        f = d / ".dsh-onevoke.yml"
-        if f.is_file():
-            return f
-        if d.parent == d:
-            break
-        d = d.parent
-    return None
+        return None
 
 
 def _parse_project_config():

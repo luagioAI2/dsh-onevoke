@@ -1,4 +1,4 @@
-# dsh-onevoke
+﻿# dsh-onevoke
 
 把 [Onevoke](https://github.com/dualface/onevoke) 的**思想**(文件看板流程、每任务独立会话、
 git worktree 提交、多角色审核门禁)原样搬到 **DeepSeek Harness (DSH)** 里,做成一个
@@ -77,7 +77,7 @@ Agent: kanban new feature login-retry 登录重试 → 立即填完整张卡 →
 
 多任务并行 = 多个独立会话并行,会话 id **稳定为 `kb-<task-id>`**(`kanban start` 会按官方格式预建会话,恢复永远用 `dsh --profile tui --resume=kb-<task-id>`,id 自动记入卡片「讨论与决策」)。同一任务内 PM/QA = 子代理,各自全新上下文,按 `reviewers.yml` 配置 provider/model。
 
-**项目级模型(多项目各自配置)**: 项目根放 `.dsh-onevoke.yml`(可提交 git,按项目隔离),规划/执行/审核分别配:
+**看板配置**(`kanban init` 自动生成模板,均在看板目录内,跟随看板、天然本地;另有 `kanban/RULES.md` 项目规则补充):
 
 ```yaml
 model:                    # 执行: kanban start 自动 /model 切换
@@ -93,7 +93,7 @@ reviewers:                # 审核按角色 (高于 review)
   PM: { provider: pi-ai, model: deepseek-v4-pro }
 ```
 
-优先级: 会话 `/model` > 项目 `reviewers.<角色>` > 项目 `review` > `~/.dsh/onevoke/reviewers.yml` > 会话默认。`.dsh-onevoke.yml` 可提交 git 共享,也可个人保留——`kanban init` 自动把它本地排除(`.git/info/exclude`),不提交也不会破坏审核门禁。
+优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > `~/.dsh/onevoke/reviewers.yml` > 会话默认。看板目录本身被 `.git/info/exclude` 排除,配置天然本地个人。
 
 **编排**: 任务组的机械调度交给 `onevoke-group <gid>`(按依赖启动就绪卡 → 轮询 → 整组完成;`--plan` 看依赖序);编排 Agent 只保留用户决策等判断。
 

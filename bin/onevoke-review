@@ -95,20 +95,15 @@ CONTEXT_TEXT="${REVIEW_CONTEXT:-None provided.}"
 REVIEWER_PROVIDER="${ONEVOKE_REVIEWER_PROVIDER:-}"
 REVIEWER_MODEL="${ONEVOKE_REVIEWER_MODEL:-}"
 REVIEWERS_FILE="${ONEVOKE_REVIEWERS:-${DSH_HOME:-$HOME/.dsh}/onevoke/reviewers.yml}"
-# 项目配置: 优先级 看板目录内 kanban/.dsh-onevoke.yml > 从 CWD 向上找项目根 .dsh-onevoke.yml
+# 项目配置固定在看板目录内: kanban/.dsh-onevoke.yml (跟随看板, 本地)
 PROJECT_CONFIG=""
-_MAIN=$(git -C "$CWD" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1)
-if [[ -n "$_MAIN" && -f "$_MAIN/kanban/.dsh-onevoke.yml" ]]; then
-  PROJECT_CONFIG="$_MAIN/kanban/.dsh-onevoke.yml"
-fi
-if [[ -z "$PROJECT_CONFIG" ]]; then
-  _P="$CWD"
-  for _ in 1 2 3 4 5 6; do
-    if [[ -f "$_P/.dsh-onevoke.yml" ]]; then PROJECT_CONFIG="$_P/.dsh-onevoke.yml"; break; fi
-    _NP=$(dirname "$_P")
-    [[ "$_NP" == "$_P" ]] && break
-    _P="$_NP"
-  done
+if [[ -n "${KANBAN_DIR:-}" && -f "$KANBAN_DIR/.dsh-onevoke.yml" ]]; then
+  PROJECT_CONFIG="$KANBAN_DIR/.dsh-onevoke.yml"
+else
+  _MAIN=$(git -C "$CWD" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | head -1)
+  if [[ -n "$_MAIN" && -f "$_MAIN/kanban/.dsh-onevoke.yml" ]]; then
+    PROJECT_CONFIG="$_MAIN/kanban/.dsh-onevoke.yml"
+  fi
 fi
 RESOLVE_REVIEWER_PY='import sys, re
 role, project, home = sys.argv[1], sys.argv[2], sys.argv[3]

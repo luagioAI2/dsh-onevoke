@@ -105,7 +105,9 @@ kanban check                           列出全部无效入口, 有则非零退
   - 在 tmux 中:新建 `kb-<slug>` window,跑 TUI,等就绪后自动注入任务 prompt。
   - 无 tmux:`start` 打印完整命令与 prompt,你在新终端运行。
 - 稳定 id 已由 kanban 自动记入卡片「讨论与决策」(`会话: kb-<task-id>`),无需 Agent 再记录。
-- **项目级模型配置**: 项目根放 `.dsh-onevoke.yml`(可提交 git,按项目隔离),规划/执行/审核可分别配:
+- **看板配置**(`kanban init` 自动生成模板,均在看板目录内,跟随看板、天然本地):
+  - `kanban/.dsh-onevoke.yml` — 模型/审核/权限(见下)。
+  - `kanban/RULES.md` — **项目级规则补充**,任务 Agent 开工时先读它;优先级: 当前任务用户指令 > `kanban/RULES.md` > onevoke 技能(全局) > 项目 `AGENTS.md`。
   ```yaml
   model:                    # 执行模型: kanban start 自动 /model 切换
     provider: deepseek-official
@@ -119,8 +121,10 @@ kanban check                           列出全部无效入口, 有则非零退
   reviewers:                # 审核按角色覆盖 (高于 review)
     PM: { provider: pi-ai, model: deepseek-v4-pro }
     QA: { provider: deepseek-official, model: deepseek-v4-flash }
+  permission:               # 任务会话沙箱 (默认 danger-full-access)
+    mode: workspace-write
   ```
-  模型解析优先级: 会话 `/model` > 项目 `reviewers.<角色>` > 项目 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。`.dsh-onevoke.yml` **可提交共享,也可个人保留**: `kanban init` 会把 `.dsh-onevoke.yml`/`.dsh-onevoke.local.yml` 加进 `.git/info/exclude`(本地排除),未跟踪也不会破坏审核"worktree 干净"前置条件。
+  模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。
 - **启动者不再巡检该卡**(除非用户要求跟踪);执行 Agent 在独立会话直接向用户汇报。任务并行 = 多个这样的会话并行。
 - 执行 Agent 开工:先 `skill` 加载 onevoke 技能 → `kanban show <id>` 读卡 → 读项目 `AGENTS.md`/规则。
 
