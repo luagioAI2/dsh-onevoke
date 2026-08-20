@@ -313,11 +313,44 @@ def _exclude_board(root: Path) -> None:
         pass  # 非 git 项目或排除失败不致命
 
 
+AGENTS_POINTER_SECTION = """## dsh-onevoke 看板流程 (kanban init --agents 写入, 幂等)
+
+本仓库任务遵循 dsh-onevoke 看板流程: 用户说"走看板"时, 先加载 onevoke 技能,
+再读 kanban/RULES.md 与 kanban/MEMORY.md (若存在), 然后按流程执行。
+"""
+
+
+def _write_agents_pointer(root: Path) -> None:
+    """kanban init --agents: 给项目根 AGENTS.md 写 opt-in 入口 (创建或追加, 幂等).
+    root = 看板目录; 项目根 = root.parent (含 kanban/ 的目录)."""
+    project = root.parent
+    agents = project / "AGENTS.md"
+    marker = "dsh-onevoke 看板流程"
+    if agents.exists():
+        text = agents.read_text(encoding="utf-8", errors="replace")
+        if marker in text:
+            print(f"AGENTS.md 已含 onevoke 入口, 跳过: {agents}")
+            return
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + AGENTS_POINTER_SECTION
+        agents.write_text(text, encoding="utf-8")
+        print(f"已追加 onevoke 入口到: {agents}")
+    else:
+        agents.write_text(AGENTS_POINTER_SECTION, encoding="utf-8")
+        print(f"已创建项目 AGENTS.md (onevoke opt-in 入口): {agents}")
+    print("提示: AGENTS.md 需提交 git, 任务 worktree 才会读到 (agent-instructions 按工作区加载).")
+
+
 def cmd_init(args) -> int:
-    root = Path(args[0]).resolve() if args else board_root()
+    with_agents = "--agents" in args
+    path_args = [a for a in args if not a.startswith("--")]
+    root = Path(path_args[0]).resolve() if path_args else board_root()
     ensure_board(root)
     _exclude_board(root)
     _write_board_templates(root)
+    if with_agents:
+        _write_agents_pointer(root)
     print(f"看板就绪: {root}")
     print("状态目录: " + ", ".join(STATES))
     return 0
