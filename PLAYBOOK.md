@@ -104,6 +104,30 @@ tmux new -s main
 dsh --profile tui
 ```
 
+## 2.5 前置阶段衔接(头脑风暴 → 需求文档 → 看板)
+
+**前置(多天讨论)不进看板**: 主会话正常对话,产出沉淀为项目文档(进 git,团队共享,跨会话不丢):
+
+```bash
+mkdir -p docs
+# 需求池: ## REQ-004 标题 + - 优先级/动机/期望/验收/威胁/范围
+# 选型与架构: architecture.md; 决策记录: decisions.md
+```
+
+**多轮头脑风暴 = 往 `docs/requirements.md` 追加 REQ 条目**(不覆盖旧的)。核对与去重:
+
+```bash
+kanban req-status docs/requirements.md
+# REQ-001 登录失败锁定  → 看板 20260820-login-lock-task [done]
+# REQ-002 登录审计日志  → 未建卡
+```
+
+**正式看板化**(自动导入契约,已建卡的 REQ 会被拒绝防重复):
+
+```bash
+kanban new --spec-file docs/requirements.md --req REQ-002 feature audit-log 审计日志 --review light
+```
+
 在 TUI 里输入(可直接粘贴):
 
 ```
