@@ -46,7 +46,7 @@ USAGE = """用法:
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
   kanban req-status [需求文档]           核对需求文档 REQ 条目与看板卡状态 (默认 docs/requirements.md)
-  kanban l3 <task-id>                    L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行)
+  kanban verify-ui <task-id>              L3 浏览器 E2E 验证 (独立阶段)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
   kanban start [--no-window] [--ignore-deps] [task-id]
                                            todo -> working 并拉起新 DSH 会话 (校验依赖)
@@ -523,12 +523,12 @@ def cmd_req_status(args) -> int:
     return 0
 
 
-def cmd_l3(args) -> int:
-    """kanban l3 <task-id> — L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行).
+def cmd_verify_ui(args) -> int:
+    """kanban verify-ui <task-id> — L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行).
     不在任务卡验收条件内; 建截图目录 + 打印执行指引, 实际浏览器 E2E 由 Agent
     按技能执行 (起服务 → 走关键流程 → 截图 → 记录到卡片「实施与验证」)."""
     if not args:
-        raise KanbanError("kanban l3 需要 <task-id>")
+        raise KanbanError("kanban verify-ui 需要 <task-id>")
     root = board_root()
     state, entry = find_card(root, args[0])
     shots = root.parent / "docs" / "screenshots" / args[0]
@@ -613,7 +613,7 @@ def cmd_new(args) -> int:
     text = template_card(title, kind)
     if frontend:
         # 前端任务验收清单: 只含 L0/L1/L2 (执行 Agent 任务内完成);
-        # L3 (浏览器 E2E + 截图) 是独立阶段, 由 kanban l3 <task-id> 单独执行, 不进卡.
+        # L3 (浏览器 E2E + 截图) 是独立阶段, 由 kanban verify-ui <task-id> 单独执行, 不进卡.
         text = text.replace(
             "## 验收条件\n\n- [ ] <填写>",
             "## 验收条件 (前端 L0-L2)\n\n"
@@ -622,7 +622,7 @@ def cmd_new(args) -> int:
             "- [ ] L2 接口: 页面调用的后端接口行为正确 (curl/实测)\n",
             1,
         )
-        text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E 验证: 独立阶段, 用 kanban l3 执行(不在本任务内)。\n", 1)
+        text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E 验证: 独立阶段, 用 kanban verify-ui 执行(不在本任务内)。\n", 1)
     if spec_file:
         if not spec_file.is_file():
             raise KanbanError(f"需求文档不存在: {spec_file}")
@@ -1432,8 +1432,8 @@ def main(argv) -> int:
             return cmd_new(args)
         if cmd == "req-status":
             return cmd_req_status(args)
-        if cmd == "l3":
-            return cmd_l3(args)
+        if cmd == "verify-ui":
+            return cmd_verify_ui(args)
         if cmd == "upgrade":
             return cmd_upgrade(args)
         if cmd == "pick":
