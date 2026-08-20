@@ -17,6 +17,10 @@ cp -r "$HERE/skills/onevoke" "$SKILLS_DIR/onevoke"
 echo "技能已安装: $SKILLS_DIR/onevoke"
 
 # 2. CLI -> ~/.local/bin (POSIX/WSL) 与 $DSH_HOME/bin (跨平台, Windows pwsh 也可用)
+# 防御: Windows git autocrlf 可能让工作区脚本带 CRLF, 剥掉 \r 保证 shebang 可用
+for f in kanban onevoke-review onevoke-group create-session.mjs; do
+  sed -i 's/\r$//' "$HERE/bin/$f" 2>/dev/null || true
+done
 install -m 0755 "$HERE/bin/kanban" "$BIN_DIR/kanban"
 install -m 0755 "$HERE/bin/onevoke-review" "$BIN_DIR/onevoke-review"
 install -m 0755 "$HERE/bin/onevoke-group" "$BIN_DIR/onevoke-group"
