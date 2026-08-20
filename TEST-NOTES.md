@@ -45,3 +45,33 @@
 ## 四、测试环境噪音(非插件问题)
 - Windows Git Bash 的 coreutils(head/grep/cut)在本会话中缺失,导致部分测试误报;真实运行环境为 WSL,coreutils 齐全。插件命令行工具以 WSL 为准。
 - Windows PowerShell 调用 `wsl sh -c` 会丢失 `$变量`(引号处理),多行命令请用脚本文件执行。
+- Windows git autocrlf 会把工作区检出为 CRLF,破坏 WSL 侧 shebang(`python3\r not found`)——`install.sh` 已加 `sed -i 's/\r$//'` 防御,仓库 `.gitattributes` 统一 LF。
+
+## 五、后续轮次实测记录
+
+### 5.1 任务组并行编排(login-app auth-group)
+- 3 张卡:audit-log + remember(无依赖,并行)+ panel(依赖前两者)。
+- `onevoke-group` 自动:并行启动 2 张 → 依赖门控(panel 留 todo)→ 前置 done 后自动拉起 panel → 整组 done 退出 0。
+- 每张卡独立稳定会话(`kb-*`),QuickTUI 全程可见;全部 light 审核 + 验收 + 集成(远端 develop 含 3 个任务的提交)。
+
+### 5.2 跨任务记忆 `kanban/MEMORY.md`
+- `kanban init` 生成模板;任务 prompt 自动指引开工读它。
+- 实测:任务 Agent 遵守记忆中的契约(后端零改动),完成后**自动追加 2 条经验**(固定文案约定 + FileServer 读盘坑),下个任务可复用。
+- 对比 memsearch:DSH 无 memsearch 生态,用看板记忆替代(本地、按项目、不依赖外部二进制)。
+
+### 5.3 规则补全 + 项目规则验证
+- 技能补「基础规则」(BASE-RULES 精神)与「代码质量」(CODE-RULES 精神)两章,规则覆盖追平 Onevoke 6 册。
+- `kanban/RULES.md` 实测生效:分支必须 `task-` 前缀(Agent 遵守)、无外部依赖、契约不改。
+
+### 5.4 kanban web 升级
+- 状态列 + 归档切换 + 关键词搜索 + 卡片全文弹窗 + SSE 实时刷新(自实现,未抄上游)。
+- 修复:done 显示完成时间、空括号清理、状态配色、审核标记。
+
+### 5.5 按项目 opt-in(移除全局污染)
+- 原 `install.sh` 在 `~/.dsh/AGENTS.md` 不存在时创建全局指针 → 会引导所有项目(包括不用 dsh-onevoke 的)到 onevoke 流程。
+- 已改:install.sh 不再创建全局 AGENTS.md;两侧已创建的全局指针删除(DSH 会话内实时移除);入口改为**项目根 AGENTS.md**(可选,进 git,团队共享)。
+- 边界:persona 指引仍为 profile 级,但条件触发(仅用户提出看板流程时),不影响其他项目。
+
+### 5.6 看板配置归一看板内
+- 项目根 `.dsh-onevoke.yml` 查找已移除;配置只认 `kanban/` 内:`kanban/.dsh-onevoke.yml`(模型/审核/权限)、`RULES.md`(项目规则)、`MEMORY.md`(记忆)。
+- `kanban init` 幂等生成 3 个模板;kanban/ 整体被 `.git/info/exclude` 排除,配置天然本地个人。

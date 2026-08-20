@@ -62,6 +62,15 @@ dsh plugin --profile tui add file:$HOME/dsh-onevoke
 
 # 1.4 验证合成配置
 dsh --profile tui --dump-config | grep -A4 "patched by dsh-onevoke"   # 应看到 system-prompt/agent-instructions 被 patch
+
+# 1.5 (可选) 项目入口: 使用本插件的项目在仓库根放 AGENTS.md 声明, 团队共享, 不污染其他项目
+cat > AGENTS.md <<'EOF'
+# 项目规则
+本仓库任务遵循 dsh-onevoke 看板流程: 用户说"走看板"时, 先加载 onevoke 技能,
+再读 kanban/RULES.md 与 kanban/MEMORY.md (若存在), 然后按流程执行。
+EOF
+git add AGENTS.md && git commit -m "AGENTS.md: dsh-onevoke 流程 opt-in 入口"
+# 注: 插件不写全局 ~/.dsh/AGENTS.md, 按项目 opt-in
 ```
 
 ## 2. 创建 golang 项目 + 本地远端(完整集成可测,不碰外网)
