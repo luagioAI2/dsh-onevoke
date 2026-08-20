@@ -46,6 +46,7 @@ USAGE = """用法:
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
   kanban req-status [需求文档]           核对需求文档 REQ 条目与看板卡状态 (默认 docs/requirements.md)
+  kanban l3 <task-id>                    L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
   kanban start [--no-window] [--ignore-deps] [task-id]
                                            todo -> working 并拉起新 DSH 会话 (校验依赖)
@@ -522,8 +523,29 @@ def cmd_req_status(args) -> int:
     return 0
 
 
+def cmd_l3(args) -> int:
+    """kanban l3 <task-id> — L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行).
+    不在任务卡验收条件内; 建截图目录 + 打印执行指引, 实际浏览器 E2E 由 Agent
+    按技能执行 (起服务 → 走关键流程 → 截图 → 记录到卡片「实施与验证」)."""
+    if not args:
+        raise KanbanError("kanban l3 需要 <task-id>")
+    root = board_root()
+    state, entry = find_card(root, args[0])
+    shots = root.parent / "docs" / "screenshots" / args[0]
+    shots.mkdir(parents=True, exist_ok=True)
+    print(f"L3 验证任务: {args[0]} [{state}]")
+    print(f"截图目录: {shots}")
+    print("执行指引 (Agent 按 onevoke 技能「前端任务验证」执行):")
+    print("  1. 启动应用 (如 go run ./cmd/server), 确认端口可访问")
+    print("  2. 浏览器/Playwright 走关键流程 (登录/验证码/交互)")
+    print("  3. 截图保存到上面的目录 (命名: 01-login.png ...)")
+    print("  4. 在卡片「实施与验证」追加记录: 流程/截图路径/结论")
+    return 0
+
+
 def cmd_new(args) -> int:
     large = "--large" in args
+    frontend = "--frontend" in args
     gid = None
     deps = []
     review = "standard"  # 审核等级: light | standard | full (默认标准)
@@ -562,6 +584,8 @@ def cmd_new(args) -> int:
             req_id = args[i]
         elif a == "--large":
             pass  # 已由 large = "--large" in args 处理
+        elif a == "--frontend":
+            pass  # 已由 frontend = "--frontend" in args 处理
         elif a.startswith("--"):
             raise KanbanError(f"未知选项: {a}")
         else:
@@ -587,6 +611,18 @@ def cmd_new(args) -> int:
         if entry_id(entry) == task_id:
             raise KanbanError(f"任务 ID 已存在: {task_id}")
     text = template_card(title, kind)
+    if frontend:
+        # 前端任务验收清单: 只含 L0/L1/L2 (执行 Agent 任务内完成);
+        # L3 (浏览器 E2E + 截图) 是独立阶段, 由 kanban l3 <task-id> 单独执行, 不进卡.
+        text = text.replace(
+            "## 验收条件\n\n- [ ] <填写>",
+            "## 验收条件 (前端 L0-L2)\n\n"
+            "- [ ] L0 静态断言: 关键元素存在、文案/结构正确\n"
+            "- [ ] L1 交互: 点击/输入等行为符合预期 (逻辑测试或浏览器实测)\n"
+            "- [ ] L2 接口: 页面调用的后端接口行为正确 (curl/实测)\n",
+            1,
+        )
+        text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E 验证: 独立阶段, 用 kanban l3 执行(不在本任务内)。\n", 1)
     if spec_file:
         if not spec_file.is_file():
             raise KanbanError(f"需求文档不存在: {spec_file}")
@@ -1396,6 +1432,8 @@ def main(argv) -> int:
             return cmd_new(args)
         if cmd == "req-status":
             return cmd_req_status(args)
+        if cmd == "l3":
+            return cmd_l3(args)
         if cmd == "upgrade":
             return cmd_upgrade(args)
         if cmd == "pick":
