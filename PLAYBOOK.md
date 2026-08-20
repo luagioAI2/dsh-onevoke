@@ -110,22 +110,34 @@ dsh --profile tui
 
 ```bash
 mkdir -p docs
-# 需求池: ## REQ-004 标题 + - 优先级/动机/期望/验收/威胁/范围
-# 选型与架构: architecture.md; 决策记录: decisions.md
+# 时间线: 需求池(第1天起,持续) → decisions(第3天,取舍) → architecture(第5天,方案) → backlog(第6天,拍板)
 ```
 
-**多轮头脑风暴 = 往 `docs/requirements.md` 追加 REQ 条目**(不覆盖旧的)。核对与去重:
+| 文档 | 内容 | 谁写 |
+|---|---|---|
+| `docs/requirements.md` | 需求池: `## REQ-004 标题` + `- 优先级/动机/期望/验收/威胁/范围` | 主会话 Agent(引导提问) |
+| `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | Agent |
+| `docs/architecture.md` | 技术方案: 选型/模块/边界/数据流 | 主会话切 plan 模型(强思考); 可 subagent 复核 |
+| `docs/backlog.md` | 拍板清单: 本轮要做的 REQ 编号(按优先级) | 用户拍板 + Agent 整理 |
+
+```markdown
+# 本轮拍板 backlog (2026-08-21)
+1. REQ-004 验证码 (P1) — 决定: 做
+2. REQ-005 会话过期 (P2) — 决定: 暂缓
+```
+
+**多轮头脑风暴 = 往 `docs/requirements.md` 追加 REQ 条目**(不覆盖旧的)。核对与去重(按优先级排序):
 
 ```bash
 kanban req-status docs/requirements.md
-# REQ-001 登录失败锁定  → 看板 20260820-login-lock-task [done]
-# REQ-002 登录审计日志  → 未建卡
+# [P1] REQ-001 登录失败锁定  → 看板 20260820-login-lock-task [done]
+# [P2] REQ-004 验证码        → 未建卡
 ```
 
-**正式看板化**(自动导入契约,已建卡的 REQ 会被拒绝防重复):
+**正式看板化**(按 backlog.md 逐条;自动导入契约,已建卡的 REQ 会被拒绝防重复):
 
 ```bash
-kanban new --spec-file docs/requirements.md --req REQ-002 feature audit-log 审计日志 --review light
+kanban new --spec-file docs/requirements.md --req REQ-004 feature captcha 验证码 --review light
 ```
 
 在 TUI 里输入(可直接粘贴):

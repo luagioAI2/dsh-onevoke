@@ -494,8 +494,14 @@ def _find_req_on_board(root: Path, req_id: str):
     return None
 
 
+def _priority_key(info) -> tuple:
+    p = info["fields"].get("优先级", "").upper()
+    rank = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(p, 9)
+    return rank, info["title"]
+
+
 def cmd_req_status(args) -> int:
-    """kanban req-status [需求文档] — 核对需求文档条目与看板卡的对应状态."""
+    """kanban req-status [需求文档] — 核对需求文档条目与看板卡的对应状态 (按优先级排序)."""
     doc = Path(args[0]) if args else Path.cwd() / "docs" / "requirements.md"
     if not doc.is_file():
         raise KanbanError(f"需求文档不存在: {doc} (可用 kanban req-status <路径>)")
@@ -505,13 +511,14 @@ def cmd_req_status(args) -> int:
         return 0
     root = board_root()
     print(f"需求文档: {doc}")
-    for rid, info in reqs.items():
+    for rid, info in sorted(reqs.items(), key=lambda kv: _priority_key(kv[1])):
+        pri = info["fields"].get("优先级", "-")
         hit = _find_req_on_board(root, rid)
         if hit:
             state, tid = hit
-            print(f"  {rid} {info['title']}  → 看板 {tid} [{state}]")
+            print(f"  [{pri:>2}] {rid} {info['title']}  → 看板 {tid} [{state}]")
         else:
-            print(f"  {rid} {info['title']}  → 未建卡")
+            print(f"  [{pri:>2}] {rid} {info['title']}  → 未建卡")
     return 0
 
 
