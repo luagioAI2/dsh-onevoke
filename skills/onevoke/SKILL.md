@@ -204,10 +204,11 @@ kanban check                           列出全部无效入口, 有则非零退
 - **L2 接口**(任务内): 页面调用的后端接口行为正确——curl/实测。
 - **L3 浏览器 E2E**(独立阶段,不在卡验收内): 任务完成、代码合并后,执行 `kanban verify-ui <task-id>` 单独验证:
   1. 启动应用并确认端口可访问;
-  2. 浏览器/Playwright 走关键流程(登录/验证码/主要交互);
+  2. 走关键流程(登录/验证码/主要交互);
   3. 截图存 `docs/screenshots/<task-id>/`(命名 01-xxx.png 起);
   4. 在卡片「实施与验证」追加: 验证流程/截图路径/结论。
-  Playwright 未安装时: 用真实浏览器手动验证, 截图仍按上述目录存; 禁把"未验证"写成通过。
+  - **截图优先用 DSH 自带 `browser` 工具**(dsh-browser-playwright 插件): `browser_screenshot <url> <path>` 等 `browser_*` 工具,无浏览器时才退回 Playwright 脚本或真实浏览器手动验证;
+  - 禁把"未验证"写成通过。
 - `kanban new --frontend` 会把 L0/L1/L2 写进卡验收条件;L3 用 `kanban verify-ui` 独立执行,不在任务卡内。
 
 ## 审核(PM → QA,子代理只读执行)

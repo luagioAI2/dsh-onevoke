@@ -537,8 +537,9 @@ def cmd_verify_ui(args) -> int:
     print(f"截图目录: {shots}")
     print("执行指引 (Agent 按 onevoke 技能「前端任务验证」执行):")
     print("  1. 启动应用 (如 go run ./cmd/server), 确认端口可访问")
-    print("  2. 浏览器/Playwright 走关键流程 (登录/验证码/交互)")
-    print("  3. 截图保存到上面的目录 (命名: 01-login.png ...)")
+    print("  2. 走关键流程 (登录/验证码/交互)")
+    print("  3. 截图存到上面的目录 (命名: 01-login.png ...)")
+    print("     优先用 DSH browser 工具: browser_screenshot <url> <截图路径>")
     print("  4. 在卡片「实施与验证」追加记录: 流程/截图路径/结论")
     return 0
 
