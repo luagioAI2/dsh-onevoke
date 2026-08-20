@@ -916,14 +916,19 @@ def cmd_web(args) -> int:
                     gid, deps = group_fields(text)
                     m = re.search(r"^- 类型:\s*(.+)$", text, re.M)
                     t = m.group(1).strip() if m else ""
-                    m = re.search(r"^- (开始时间|完成时间):\s*(.+)$", text, re.M)
-                    ts = m.group(2).strip() if m else ""
+                    # done/archived 显示完成时间, 否则显示开始时间
+                    m = re.search(r"^- 完成时间:\s*(.+)$", text, re.M)
+                    if not m:
+                        m = re.search(r"^- 开始时间:\s*(.+)$", text, re.M)
+                    ts = m.group(1).strip() if m else ""
+                    m = re.search(r"^- 审核:\s*(.+)$", text, re.M)
+                    review = m.group(1).strip() if m else ""
                     m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
                     sess = m.group(1) if m else ""
                     rows.append({
                         "id": entry_id(entry), "title": card_title(text),
                         "type": t, "time": ts, "large": large,
-                        "group": gid, "deps": deps, "session": sess,
+                        "group": gid, "deps": deps, "session": sess, "review": review,
                     })
             states[state] = rows
         return {"board": root.as_posix(), "states": states}
@@ -970,20 +975,30 @@ def cmd_web(args) -> int:
                 marks = []
                 if r["large"]:
                     marks.append("large")
+                if r["review"]:
+                    marks.append(f"审 {esc(r['review'])}")
                 if r["group"]:
                     marks.append(f"组 {esc(r['group'])}")
                 if r["session"]:
                     marks.append(f"会话 {esc(r['session'])}")
-                deps = f" 前置: {esc(', '.join(r['deps']))}" if r["deps"] else ""
+                parts = []
+                if r["type"]:
+                    parts.append(f"[{esc(r['type'])}]")
+                if r["time"]:
+                    parts.append(esc(r["time"]))
+                if marks:
+                    parts.append(" ".join(marks))
+                if r["deps"]:
+                    parts.append(f"前置: {esc(', '.join(r['deps']))}")
+                cm = " ".join(parts)
                 cards += (
                     f'<div class="card"><div class="cid">{esc(r["id"])}</div>'
                     f'<div class="ct">{esc(r["title"])}</div>'
-                    f'<div class="cm">[{esc(r["type"])}] {esc(r["time"])}'
-                    + (f" {' '.join(marks)}" if marks else "")
-                    + f"{deps}</div></div>"
+                    + (f'<div class="cm">{cm}</div>' if cm else "")
+                    + "</div>"
                 )
             cols.append(
-                f'<section class="col"><h2>{state} <span class="n">{len(rows)}</span></h2>{cards or "<p class=empty>空</p>"}</section>'
+                f'<section class="col {state}"><h2>{state} <span class="n">{len(rows)}</span></h2>{cards or "<p class=empty>空</p>"}</section>'
             )
         return f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -991,10 +1006,14 @@ def cmd_web(args) -> int:
 <style>
 body{{background:#121212;color:#e8e8e8;font:14px/1.5 system-ui;margin:0;padding:16px}}
 h1{{font-size:18px}} .cols{{display:flex;gap:12px;flex-wrap:wrap}}
-.col{{flex:1 1 260px;background:#1c1c1c;border-radius:10px;padding:12px}}
-h2{{font-size:14px;margin:0 0 8px;color:#9adcff}} .n{{color:#888}}
+.col{{flex:1 1 250px;background:#1c1c1c;border-radius:10px;padding:12px}}
+h2{{font-size:14px;margin:0 0 8px}} .n{{color:#888;font-weight:400}}
+.col.todo h2{{color:#9adcff}} .col.working h2{{color:#ffd27e}}
+.col.done h2{{color:#7ee787}} .col.archived h2,.col.trash h2{{color:#888}}
+.col.backlog h2{{color:#bbb}}
 .card{{background:#242424;border-radius:8px;padding:8px 10px;margin:6px 0}}
-.cid{{font-size:11px;color:#7ee787}} .ct{{font-weight:600}} .cm{{color:#aaa;font-size:12px}}
+.cid{{font-size:11px;color:#7ee787}} .ct{{font-weight:600}}
+.cm{{color:#aaa;font-size:12px}}
 .empty{{color:#555}} a{{color:#9adcff}}
 </style></head><body>
 <h1>看板 · {esc(data['board'])}</h1>
