@@ -105,6 +105,45 @@ reviewers:                # 审核按角色 (高于 review)
 
 **任务会话沙箱**: 默认 `danger-full-access`(Onevoke 同款免确认,能 push 外部远端),项目 `.dsh-onevoke.yml` 可设 `permission: {mode: workspace-write}` 收紧;用户主会话保持 workspace-write + ask。
 
+## 优先级与生效规则
+
+### 规则优先级链(从高到低)
+
+```
+① 当前任务的用户指令            最高, 覆盖一切
+② 项目 AGENTS.md / CLAUDE.md    DSH 自动加载; 旧项目自带规则优先, 不受本插件影响
+③ 看板配置 kanban/.dsh-onevoke.yml + kanban/RULES.md + MEMORY.md
+④ persona(插件全局, 条件触发)  tui profile 每个会话都有, 但只在用户要走看板流程时触发
+⑤ 技能 SKILL.md 内置默认值      最低, 被上面各档覆盖
+```
+
+**入口与污染边界**: 本插件**不写全局 `~/.dsh/AGENTS.md`**(按项目 opt-in)。
+- 用本插件的项目: 项目根放 `AGENTS.md`(可 `kanban init --agents` 自动写入,幂等)或直接说"走看板"。
+- 不用的项目: 零影响——persona 那行是条件触发(`when the user brings a requirement and it should follow the kanban process`),且 ② 项目指令优先。
+- 任务 Agent 开工时读取顺序: 卡片 → `kanban/RULES.md` → `kanban/MEMORY.md` → 项目 `AGENTS.md`。
+
+### 模型解析优先级
+
+| 用途 | 优先级(高→低) |
+|---|---|
+| 执行模型 | 会话 `/model` > 看板 `model` > profile 默认(`cordis.patch.yml`) |
+| 审核模型 | 环境变量 `ONEVOKE_REVIEWER_*` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认 |
+
+### 审核等级优先级
+
+卡 `- 审核:` 字段(`kanban new --review light|standard|full`)> 默认 `标准`;豁免(纯 Markdown 或 ≤10 行)自动生效,不受等级影响。等级变更需用户同意并在卡片记录。
+
+### 插件默认值
+
+| 项 | 默认 | 覆盖方式 |
+|---|---|---|
+| 审核等级 | 标准 | `--review` / 卡字段 |
+| 任务会话沙箱 | danger-full-access | 看板 `permission.mode` |
+| 执行模型 | profile 配置 | 看板 `model` / 会话 `/model` |
+| 审核模型 | home `reviewers.yml` | 看板 `review/reviewers` / env |
+| 完成时机 | 先报告等用户验收 | 用户指令 |
+| 编排间隔 | onevoke-group 60s | `--interval` |
+
 ## 与 Onevoke 的对应关系
 
 | Onevoke | dsh-onevoke(DSH 原生) |
