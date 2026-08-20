@@ -41,7 +41,7 @@ REQUIRED_SECTIONS = ("任务目标", "预期成果", "验收条件", "不在本�
 PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填", "填写")
 
 USAGE = """用法:
-  kanban init [path]                       幂等创建看板和 6 个状态目录
+  kanban init [path] [--agents]           幂等创建看板和 6 个状态目录; --agents 另给项目 AGENTS.md 写 opt-in 入口
   kanban list [state] [--mobile]           列出卡片 (默认全部状态; 大任务标 [large])
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] <feature|bug|chore|research> <slug> <标题...>
