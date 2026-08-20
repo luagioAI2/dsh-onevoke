@@ -360,10 +360,25 @@ BOARD_RULES_TEMPLATE = """# 本看板项目规则 (kanban/RULES.md)
 """
 
 
+BOARD_MEMORY_TEMPLATE = """# 本看板跨任务记忆 (kanban/MEMORY.md)
+
+任务 Agent 开工时先读本文件; 任务完成时把值得留存的经验追加为短条目。
+只记跨任务有用的内容, 不复制会话流水:
+
+- 关键决策与取舍 (为什么这么选)
+- 踩过的坑与规避方法
+- 架构/API/长期规则类结论 (稳定后应同步到项目文档或 AGENTS.md)
+- 适用 commit 或任务 ID
+
+条目格式: `- [日期] <一句话结论> (任务/commit 引用)`
+"""
+
+
 def _write_board_templates(root: Path) -> None:
-    """kanban init 生成看板配置模板 (仅当不存在, 幂等)."""
+    """kanban init 生成看板配置/规则/记忆模板 (仅当不存在, 幂等)."""
     for name, content in ((".dsh-onevoke.yml", BOARD_CONFIG_TEMPLATE),
-                          ("RULES.md", BOARD_RULES_TEMPLATE)):
+                          ("RULES.md", BOARD_RULES_TEMPLATE),
+                          ("MEMORY.md", BOARD_MEMORY_TEMPLATE)):
         p = root / name
         if not p.exists():
             p.write_text(content, encoding="utf-8")
@@ -542,15 +557,21 @@ def resolve_dsh() -> list:
 
 
 def task_prompt(task_id: str, title: str, entry: Path) -> str:
-    rules = entry.parent.parent / "RULES.md"
-    rules_note = f" 若 {rules} 存在, 先读它(项目看板规则, 优先级高于通用技能)。" if rules.exists() else ""
+    board = entry.parent.parent
+    rules = board / "RULES.md"
+    mem = board / "MEMORY.md"
+    notes = []
+    if rules.exists():
+        notes.append(f" 若 {rules} 存在, 先读它(项目看板规则, 优先级高于通用技能)。")
+    if mem.exists():
+        notes.append(f" 若 {mem} 存在, 先读它(跨任务记忆, 参考以往经验与决策)。")
     return (
         f"看板任务 {task_id} - {title}。"
         f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
         f"然后按技能流程实现该任务 (worktree + 分支 + 提交 + 审核 + 请求验收)。"
         f"本任务在独立会话中执行; 会话恢复 id 见 TUI 退出提示, 结束时把它记入卡片"
         f"「讨论与决策」(格式: 会话: <id>)。"
-        + rules_note
+        + "".join(notes)
     )
 
 
