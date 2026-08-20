@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# onevoke-review — 审核证据收集与门禁校验 (Onevoke wrapper 契约的 DSH 版).
+#
+# 与 onevoke 的 codex-review.sh/grok-review.sh 同构, 但**不调用任何 reviewer
+# CLI**: 证据与角色 Prompt 交给 DSH 的 subagent 工具执行只读审核 (见技能
+# skills/onevoke/SKILL.md). 本脚本保证机械不变量:
+#   1. 参数校验 + 角色归一 (PM/QA/CSA/Hacker)
+#   2. Git 门禁: base 是 commit 祖先, HEAD == commit, worktree 干净
+#   3. 证据收集: commit 列表 + 文件台账 + 完整 patch + commit tree
+#   4. 只读审核前后 worktree 指纹一致 (被改则 exit 2)
+#
+# 用法: onevoke-review <worktree> <base> <commit> <role> <task-goal|spec-path> [review-context]
+# 输出: 证据目录绝对路径 (stdout 最后一行), 角色审核 Prompt (stdout 其余内容)。
+
+set -euo pipefail
+umask 077
+export GIT_OPTIONAL_LOCKS=0
+
+usage() {
+  echo "用法: onevoke-review <worktree> <base> <commit> <role> <task-goal|spec-path> [review-context]" >&2
+  echo "角色: PM, QA, CSA, Hacker" >&2
+  exit 2
+}
+
+fail() {
+  echo "Error: $1" >&2
+  exit "${2:-2}"
+}
+
+if (($# < 5 || $# > 6)); then
+  usage
+fi
+
+readonly CWD="$1"
+readonly BASE="$2"
+readonly COMMIT="$3"
+readonly ROLE_INPUT="$4"
+readonly TASK_INPUT="$5"
+readonly REVIEW_CONTEXT="${6-}"
+
+case "$ROLE_INPUT" in
+  PM | pm) ROLE="PM" ;;
+  QA | qa) ROLE="QA" ;;
+  CSA | csa | CodeSecurityAnalyst | codesecurityanalyst) ROLE="CSA" ;;
+  Hacker | hacker) ROLE="Hacker" ;;
+  *) fail "不支持的角色: $ROLE_INPUT" ;;
+esac
+
+# ── 门禁: 只读前置校验 ─────────────────────────────────────────────────────
+[[ -d "$CWD/.git" || -d "$CWD" ]] || fail "CWD 不是目录: $CWD"
+cd "$CWD" || fail "无法进入 CWD: $CWD"
+
+git rev-parse --verify -q "$BASE" >/dev/null || fail "base 不是有效 commit: $BASE"
+git rev-parse --verify -q "$COMMIT" >/dev/null || fail "commit 不是有效 commit: $COMMIT"
+BASE_SHA=$(git rev-parse "$BASE")
+COMMIT_SHA=$(git rev-parse "$COMMIT")
+git merge-base --is-ancestor "$BASE_SHA" "$COMMIT_SHA" || fail "base 不是 commit 的祖先"
+[[ "$(git rev-parse HEAD)" == "$COMMIT_SHA" ]] || fail "HEAD 必须等于 commit (当前 $(git rev-parse HEAD | cut -c1-12))"
+
+# worktree 干净: 无未提交 + 无未跟踪
+DIRTY=$(git status --porcelain)
+if [[ -n "$DIRTY" ]]; then
+  fail "worktree 有未提交或未跟踪文件, 无法审核:"
+  echo "$DIRTY" | head -20 >&2
+fi
+
+# 只读审核前指纹 (跟踪文件状态); 结束时必须一致
+BEFORE_FINGERPRINT=$(git status --porcelain=v1 | md5sum | cut -d' ' -f1)
+readonly BEFORE_FINGERPRINT
+
+# ── 证据收集 ───────────────────────────────────────────────────────────────
+EVIDENCE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/onevoke-review.XXXXXX")
+readonly EVIDENCE_DIR
+# 注意: 证据目录在审核轮次结束前必须保留 (子代理只读引用); 审核闭环结束后
+# 由调用方清理: rm -rf "$EVIDENCE_DIR"
+
+git log --format="%h %s" "$BASE_SHA..$COMMIT_SHA" > "$EVIDENCE_DIR/commits.txt"
+git diff --numstat "$BASE_SHA" "$COMMIT_SHA" > "$EVIDENCE_DIR/files.txt"
+git diff --stat "$BASE_SHA" "$COMMIT_SHA" > "$EVIDENCE_DIR/stat.txt"
+git diff "$BASE_SHA" "$COMMIT_SHA" > "$EVIDENCE_DIR/patch.diff" || true
+git ls-tree -r --name-only "$COMMIT_SHA" > "$EVIDENCE_DIR/tree.txt"
+git show -s --format="%H%n%an%n%ad%n%s" --date=iso "$COMMIT_SHA" > "$EVIDENCE_DIR/commit.txt"
+
+TASK_ABS="$TASK_INPUT"
+if [[ -f "$TASK_INPUT" ]]; then
+  TASK_ABS=$(realpath "$TASK_INPUT")
+fi
+CONTEXT_TEXT="${REVIEW_CONTEXT:-None provided.}"
+
+# ── 审核执行模型 (per-role reviewer 配置) ─────────────────────────────────
+# 来源(高到低): (1) 环境变量 ONEVOKE_REVIEWER_PROVIDER/MODEL
+#               (2) 项目 .dsh-onevoke.yml: reviewers.<ROLE> > review (通用)
+#               (3) $DSH_HOME/onevoke/reviewers.yml 该角色 (home 默认)
+#               (4) 会话默认模型 (subagent 不支持覆盖时忽略)
+REVIEWER_PROVIDER="${ONEVOKE_REVIEWER_PROVIDER:-}"
+REVIEWER_MODEL="${ONEVOKE_REVIEWER_MODEL:-}"
+REVIEWERS_FILE="${ONEVOKE_REVIEWERS:-${DSH_HOME:-$HOME/.dsh}/onevoke/reviewers.yml}"
+# 项目配置: 从审核目标 CWD 向上找 .dsh-onevoke.yml
+PROJECT_CONFIG=""
+_P="$CWD"
+for _ in 1 2 3 4 5 6; do
+  if [[ -f "$_P/.dsh-onevoke.yml" ]]; then PROJECT_CONFIG="$_P/.dsh-onevoke.yml"; break; fi
+  _NP=$(dirname "$_P")
+  [[ "$_NP" == "$_P" ]] && break
+  _P="$_NP"
+done
+RESOLVE_REVIEWER_PY='import sys, re
+role, project, home = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def parse(path):
+    out = {}
+    section = None
+    subsection = None
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if not line.strip() or line.strip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        m = re.match(r"([A-Za-z_]+):\s*(.*)$", line.strip())
+        if not m:
+            continue
+        key, val = m.group(1), m.group(2).strip().strip("\"\x27")
+        if indent == 0:
+            section = key
+            subsection = None
+            continue
+        if section == "reviewers" and indent == 2:
+            subsection = key
+            continue
+        if section == "reviewers" and indent >= 4 and subsection:
+            out.setdefault("reviewers", {}).setdefault(subsection, {})[key] = val
+            continue
+        if indent == 2 and section in ("model", "plan", "review"):
+            out.setdefault(section, {})[key] = val
+    return out
+
+def emit(provider, model):
+    if provider:
+        print(f"provider={provider}")
+    if model:
+        print(f"model={model}")
+
+project_cfg = parse(project) if project else {}
+home_cfg = parse(home) if home else {}
+role_cfg = project_cfg.get("reviewers", {}).get(role)
+if role_cfg:
+    emit(role_cfg.get("provider"), role_cfg.get("model"))
+    sys.exit(0)
+gen = project_cfg.get("review")
+if gen and (gen.get("provider") or gen.get("model")):
+    emit(gen.get("provider"), gen.get("model"))
+    sys.exit(0)
+role_cfg = home_cfg.get("reviewers", {}).get(role)
+if role_cfg:
+    emit(role_cfg.get("provider"), role_cfg.get("model"))
+    sys.exit(0)
+gen = home_cfg.get("review")
+if gen:
+    emit(gen.get("provider"), gen.get("model"))'
+PY=""
+# 逐个候选验证能真正执行 (Windows Store 的 python3 stub 静默无输出, 不能算数)
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys' >/dev/null 2>&1; then
+    PY="$cand"
+    break
+  fi
+done
+# Git Bash (MSYS) 下 $HOME 是 /c/Users/... 而 Windows 原生 python 读不了;
+# 用 cygpath 转成 Windows 路径; WSL 无 cygpath, 保持原样.
+REVIEWERS_PATH="$REVIEWERS_FILE"
+PROJECT_PATH="$PROJECT_CONFIG"
+if [[ -n "$PY" ]] && command -v cygpath >/dev/null 2>&1; then
+  REVIEWERS_PATH=$(cygpath -w "$REVIEWERS_FILE")
+  if [[ -n "$PROJECT_CONFIG" ]]; then PROJECT_PATH=$(cygpath -w "$PROJECT_CONFIG"); fi
+fi
+if [[ -n "$PY" ]]; then
+  while IFS='=' read -r key val; do
+    [[ -z "$val" ]] && continue
+    val=$(printf '%s' "$val" | tr -d '\r\n')  # 剥离 Windows python 管道可能带上的换行
+    if [[ "$key" == "provider" && -z "$REVIEWER_PROVIDER" ]]; then REVIEWER_PROVIDER="$val"; fi
+    if [[ "$key" == "model" && -z "$REVIEWER_MODEL" ]]; then REVIEWER_MODEL="$val"; fi
+  done < <("$PY" -c "$RESOLVE_REVIEWER_PY" "$ROLE" "$PROJECT_PATH" "$REVIEWERS_PATH")
+fi
+
+# ── 角色审核 Prompt (交给 DSH subagent 执行) ─────────────────────────────
+cat <<PROMPT
+你正在执行 Onevoke 工作流的「$ROLE」阶段只读审核。
+
+审核目标: 确认任务计划或用户明确目标已完整、正确落实; 重点查流程是否闭环、
+逻辑有无漏洞, 及与该目标直接相关的回归。禁止借审核扩大任务范围。
+
+只读约束: 只读代码/文档/运行只读检查命令; 禁止修改文件、index、refs 或
+worktree。审核期间不得留下任何改动。
+
+范围规则: 只报告本次改动 (base..commit) 引入、加剧或掩盖的问题; 改动前已
+存在且未被本轮加剧或掩盖的问题不得要求修复, 不得阻塞审核。
+
+任务契约: $TASK_ABS
+
+审核 base: $BASE_SHA
+审核 commit: $COMMIT_SHA
+审核上下文: $CONTEXT_TEXT
+审核执行模型: ${REVIEWER_PROVIDER:-<会话默认>}/${REVIEWER_MODEL:-<会话默认>} (把 provider/model 传给 subagent 作为覆盖; 工具不支持则忽略)
+
+证据 (只读引用, 禁修改):
+  commit 列表: $EVIDENCE_DIR/commits.txt
+  文件台账:   $EVIDENCE_DIR/files.txt
+  改动统计:   $EVIDENCE_DIR/stat.txt
+  完整 patch: $EVIDENCE_DIR/patch.diff
+  commit tree: $EVIDENCE_DIR/tree.txt
+  commit 详情: $EVIDENCE_DIR/commit.txt
+
+档位 (每条 finding 必须标档):
+  blocking 目标未达成, 或数据损坏/安全失效/主流程不可用   [必修]
+  high     常见路径必然出错或回归, 触发条件明确            [必修]
+  medium   特定条件下出错, 或契约/边界/错误处理有真实缺陷   [必修]
+  low      确实缺陷但触发罕见且后果可忽略                   [不阻塞]
+  推荐     按项目规则或既有约定应当改的做法                 [不阻塞]
+  建议     可选改进, 取舍由负责人决定                       [不阻塞]
+必修档写正文; 非阻塞档集中写在 NON-BLOCKING 段。
+
+输出格式: 逐条 [档位] 问题; 触发条件; 实际影响; 建议 (最小修复)。
+先核实再报, 每条落到证据 (文件/行号/commit)。
+PROMPT
+
+echo "EVIDENCE_DIR=$EVIDENCE_DIR" >&2
+
+# ── 审核后门禁: worktree 必须未被改动 ────────────────────────────────────
+AFTER_FINGERPRINT=$(git status --porcelain=v1 | md5sum | cut -d' ' -f1)
+if [[ "$BEFORE_FINGERPRINT" != "$AFTER_FINGERPRINT" ]]; then
+  fail "审核期间 worktree 被改动, 审核作废 (指纹不一致)"
+fi

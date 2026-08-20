@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""onevoke-group — 任务组编排脚本 (确定性调度, 替代 Agent 临场判断).
+
+职责: 按依赖顺序自动启动就绪卡 (kanban start), 轮询状态, 直到整组 done 或超时。
+编排 Agent 只保留判断 (用户决策/异常交接), 调度交给本脚本。
+
+用法:
+  onevoke-group <group-id> [--plan] [--dry-run] [--interval <秒>] [--max-wait <秒>]
+    --plan       只打印依赖序与当前就绪集, 不启动
+    --dry-run    打印将启动的卡, 不真正 start
+    --interval   轮询间隔 (默认 60s)
+    --max-wait   最长等待秒数 (默认 6h; 0 = 不限)
+
+退出码: 0 整组完成; 1 超时或校验失败; 2 用法错误。
+"""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+USAGE = """用法: onevoke-group <group-id> [--plan] [--dry-run] [--interval <秒>] [--max-wait <秒>]"""
+
+
+class GroupError(Exception):
+    pass
+
+
+def resolve_kanban_cmd() -> list:
+    """返回可直接 subprocess 的 kanban 命令列表 (Windows 脚本需 python 包装)."""
+    exe = shutil.which("kanban")
+    cands = [exe] if exe else []
+    cands += [
+        str(Path.home() / ".local" / "bin" / "kanban"),
+        str(Path.home() / ".dsh" / "bin" / "kanban"),
+    ]
+    for cand in cands:
+        if not cand or not Path(cand).exists():
+            continue
+        if os.name == "nt":
+            if cand.endswith((".exe", ".cmd", ".bat", ".ps1")):
+                return [cand]
+            py = shutil.which("python")
+            if py:
+                return [py, cand]
+        else:
+            return [cand]
+    raise GroupError("找不到 kanban CLI; 请先运行 install.sh")
+
+
+def run_kanban(cmd: list, *args) -> tuple[int, str]:
+    env = dict(os.environ)
+    if os.environ.get("KANBAN_DIR"):
+        env["KANBAN_DIR"] = os.environ["KANBAN_DIR"]
+    r = subprocess.run([*cmd, *args], capture_output=True, text=True, env=env, timeout=120)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def parse_group(output: str):
+    """解析 `kanban group <gid>` 输出 -> {id: (state, ready_bool)}."""
+    members = {}
+    for line in output.splitlines():
+        m = re.match(r"^\s+(\S+)\s+(\S+)\s+前置:", line)
+        if m:
+            state, task_id = m.group(1), m.group(2)
+            ready = "就绪" in line
+            members[task_id] = (state, ready)
+    return members
+
+
+def main(argv) -> int:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return 0 if argv else 1
+    gid = argv[0]
+    plan_only = "--plan" in argv
+    dry_run = "--dry-run" in argv
+    interval = 60
+    max_wait = 6 * 3600
+    args = argv[1:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--interval":
+            i += 1
+            interval = int(args[i])
+        elif a == "--max-wait":
+            i += 1
+            max_wait = int(args[i])
+        elif a in ("--plan", "--dry-run"):
+            pass
+        else:
+            raise GroupError(f"未知选项: {a}")
+        i += 1
+
+    kanban_cmd = resolve_kanban_cmd()
+
+    # 校验: 看板整体 + 组关系合法
+    rc, out = run_kanban(kanban_cmd, "check")
+    if rc != 0:
+        print(f"看板校验未通过, 中止编排:\n{out}", file=sys.stderr)
+        return 1
+
+    rc, out = run_kanban(kanban_cmd, "group", gid)
+    if rc != 0:
+        print(f"任务组 {gid} 查询失败: {out}", file=sys.stderr)
+        return 1
+    members = parse_group(out)
+    if not members:
+        print(f"任务组 {gid} 没有成员", file=sys.stderr)
+        return 1
+
+    def summary():
+        states = {}
+        for tid, (state, _) in members.items():
+            states.setdefault(state, []).append(tid)
+        return "; ".join(f"{s}:{len(v)}" for s, v in sorted(states.items()))
+
+    if plan_only:
+        print(f"任务组 {gid} 依赖序 (拓扑):")
+        printed = set()
+        order = []
+        while len(order) < len(members):
+            progressed = False
+            for tid, (state, ready) in members.items():
+                if tid in printed:
+                    continue
+                # 就绪 = 前置全 done (kanban group 已算好), 无前置的卡视为就绪
+                if ready or state != "todo":
+                    order.append(f"{tid} [{state}]")
+                    printed.add(tid)
+                    progressed = True
+            if not progressed:
+                for tid in members:
+                    if tid not in printed:
+                        order.append(f"{tid} [阻塞]")
+                        printed.add(tid)
+        for line in order:
+            print("  " + line)
+        print(f"当前状态: {summary()}")
+        return 0
+
+    print(f"编排任务组 {gid}: 初始 {summary()}")
+    deadline = time.monotonic() + max_wait if max_wait > 0 else None
+    while True:
+        rc, out = run_kanban(kanban_cmd, "group", gid)
+        if rc != 0:
+            print(f"轮询失败: {out}", file=sys.stderr)
+            return 1
+        members = parse_group(out)
+        if all(state == "done" for state, _ in members.values()):
+            print(f"整组完成: {gid} ({summary()})")
+            return 0
+        if deadline is not None and time.monotonic() >= deadline:
+            pending = [tid for tid, (state, _) in members.items() if state != "done"]
+            print(f"超时未完成, 未完成卡: {', '.join(pending)}", file=sys.stderr)
+            return 1
+        ready = [tid for tid, (state, ok) in members.items() if state == "todo" and ok]
+        if ready:
+            for tid in ready:
+                print(f"启动就绪卡: {tid}")
+                if not dry_run:
+                    rc2, out2 = run_kanban(kanban_cmd, "start", tid)
+                    if rc2 != 0:
+                        print(f"  start {tid} 失败: {out2}", file=sys.stderr)
+        elif dry_run:
+            print(f"[dry-run] 当前无就绪卡, 状态: {summary()}")
+        time.sleep(interval)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except GroupError as exc:
+        print(f"onevoke-group: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except KeyboardInterrupt:
+        print("已中断", file=sys.stderr)
+        sys.exit(130)

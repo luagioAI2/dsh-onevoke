@@ -1,0 +1,1142 @@
+#!/usr/bin/env python3
+"""kanban — 文件看板 CLI (Onevoke 思想, 零第三方依赖, 与 DSH 插件 dsh-onevoke 配套).
+
+看板 = 文件系统目录, 不进 Git, 唯一实例在主 worktree 根 (KANBAN_DIR 可覆盖):
+
+    kanban/
+      backlog/  todo/  working/  done/  archived/  trash/
+
+状态机: backlog -> todo -> working -> done -> archived; 任意状态 -> trash (仅用户明确要求).
+任务 ID: YYYYMMDD-short-slug-task. 任务形态:
+  小任务: <state>/<task-id>.md 单文件卡
+  大任务: <state>/<task-id>/ 目录, 含 spec.md (必需) + plan.md (按需) + report.md (完成时)
+任务组: 独立卡之间的关系, 卡内「讨论与决策」记录:
+  任务组: YYYYMMDD-short-slug-group
+  前置任务: <同组任务 ID, 逗号分隔 | N/A>
+
+命令: init / list / show / new / pick / start / move / check / group / upgrade
+"""
+
+import datetime
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+STATES = ("backlog", "todo", "working", "done", "archived", "trash")
+TYPES = ("feature", "bug", "chore", "research")
+TASK_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-task$")
+GROUP_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-group$")
+SLUG_RE = re.compile(r"^[a-z0-9-]+$")
+
+# 进 todo/ 前必须非空且不留占位符的契约章节
+REQUIRED_SECTIONS = ("任务目标", "预期成果", "验收条件", "不在本轮范围")
+PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填", "填写")
+
+USAGE = """用法:
+  kanban init [path]                       幂等创建看板和 6 个状态目录
+  kanban list [state] [--mobile]           列出卡片 (默认全部状态; 大任务标 [large])
+  kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
+  kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] <feature|bug|chore|research> <slug> <标题...>
+  kanban pick [task-id]                    backlog -> todo (校验契约完整)
+  kanban start [--no-window] [--ignore-deps] [task-id]
+                                           todo -> working 并拉起新 DSH 会话 (校验依赖)
+  kanban resume <task-id>                  恢复卡片记录的会话 (崩溃/中断后续跑)
+  kanban move <task-id> <todo|working|done|archived|trash>
+  kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
+  kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
+  kanban upgrade <task-id>                 小任务 -> 大任务 (仅 backlog/working)
+  kanban check                             列出全部无效入口, 有则非零退出"""
+
+
+class KanbanError(Exception):
+    pass
+
+
+def board_root() -> Path:
+    env = os.environ.get("KANBAN_DIR")
+    if env:
+        return Path(env).resolve()
+    try:
+        out = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        if out.returncode == 0:
+            for line in out.stdout.splitlines():
+                if line.startswith("worktree "):
+                    return Path(line[len("worktree "):].strip()) / "kanban"
+    except Exception:
+        pass
+    return Path.cwd() / "kanban"
+
+
+def now() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def today() -> str:
+    return datetime.datetime.now().strftime("%Y%m%d")
+
+
+def ensure_board(root: Path) -> None:
+    for state in STATES:
+        (root / state).mkdir(parents=True, exist_ok=True)
+
+
+def entry_id(entry: Path) -> str:
+    """入口 ID: 文件取 stem, 目录取名字."""
+    return entry.stem if entry.is_file() else entry.name
+
+
+def is_large(entry: Path) -> bool:
+    return entry.is_dir()
+
+
+def spec_path(entry: Path) -> Path:
+    return entry if entry.is_file() else entry / "spec.md"
+
+
+def read_any_text(path: Path) -> str:
+    """读文本, 容忍编码偏差 (外部写入的 plan/report.md 可能是 GBK/其他): UTF-8 优先, 失败用替换符."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+
+def read_card(entry: Path) -> str:
+    try:
+        return read_any_text(spec_path(entry))
+    except OSError as exc:
+        raise KanbanError(f"读取卡片失败 {spec_path(entry)}: {exc}")
+
+
+def iter_entries(root: Path):
+    """yield (state, entry) 遍历看板全部卡 (小任务文件 + 大任务目录)."""
+    for state in STATES:
+        state_dir = root / state
+        if not state_dir.is_dir():
+            continue
+        for entry in sorted(state_dir.iterdir()):
+            if entry.is_file() and entry.suffix == ".md":
+                yield state, entry
+            elif entry.is_dir() and (entry / "spec.md").is_file():
+                yield state, entry
+
+
+def find_card(root: Path, task_id: str):
+    if not TASK_ID_RE.match(task_id):
+        raise KanbanError(f"任务 ID 格式错误: {task_id} (应形如 {today()}-short-slug-task)")
+    for state, entry in iter_entries(root):
+        if entry_id(entry) == task_id:
+            return state, entry
+    raise KanbanError(f"找不到任务: {task_id}")
+
+
+def find_card_any(root: Path, task_id: str):
+    """允许 task 或 group id; 找不到返回 (None, None)."""
+    for state, entry in iter_entries(root):
+        if entry_id(entry) == task_id:
+            return state, entry
+    return None, None
+
+
+def card_title(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return "(无标题)"
+
+
+def section_body(text: str, section: str) -> str:
+    lines = text.splitlines()
+    out, active = [], False
+    for line in lines:
+        if line.startswith("## "):
+            if active:
+                break
+            active = line[2:].strip() == section
+            continue
+        if active:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def has_placeholder(body: str) -> bool:
+    return any(p in body for p in PLACEHOLDERS)
+
+
+def validate_contract(text: str, where: str) -> list:
+    problems = []
+    for section in REQUIRED_SECTIONS:
+        body = section_body(text, section)
+        if not body:
+            problems.append(f"{where}: 缺少「{section}」")
+        elif has_placeholder(body):
+            problems.append(f"{where}: 「{section}」仍有占位符, 未填写完整")
+    return problems
+
+
+def group_fields(text: str):
+    """解析「讨论与决策」里的任务组关系, 返回 (group_id, [deps]) 或 (None, [])."""
+    body = section_body(text, "讨论与决策")
+    m = re.search(r"^任务组:\s*(\S+)", body, re.M)
+    gid = m.group(1).strip() if m else None
+    m = re.search(r"^前置任务:\s*(.+)$", body, re.M)
+    deps = []
+    if m:
+        raw = m.group(1).strip()
+        if raw and raw.upper() != "N/A":
+            deps = [d.strip() for d in re.split(r"[,，\s]+", raw) if d.strip()]
+    return gid, deps
+
+
+def dump_card(entry: Path) -> None:
+    print(f"===== {entry} =====")
+    print(read_card(entry))
+    if is_large(entry):
+        for extra in ("plan.md", "report.md"):
+            p = entry / extra
+            if p.exists():
+                print(f"\n----- {extra} -----")
+                print(read_any_text(p))
+
+
+def template_card(title: str, kind: str) -> str:
+    return f"""# {title}
+
+- 类型: {'Feature' if kind == 'feature' else kind.capitalize()}
+- 创建时间: {now()}
+- 负责人:
+- 开始时间:
+- 完成时间:
+- 任务分支:
+- 审核: 标准
+- 结果:
+
+## 任务目标
+
+<填写>
+
+## 用户决策
+
+N/A
+
+## 预期成果
+
+<填写>
+
+## 验收条件
+
+- [ ] <填写>
+
+## 威胁模型
+
+N/A
+
+## 不在本轮范围
+
+- <填写>
+
+## 讨论与决策
+
+<关键结论; 会话 id 也记录在这里>
+
+## 实施与验证
+
+<计划, 分支, commit, 验证命令, 结果>
+
+## 完成总结
+
+<完成前留空>
+"""
+
+
+def stamp_group(text: str, gid: str, deps: list) -> str:
+    """在「讨论与决策」开头写入任务组关系 (幂等: 已有则不改)."""
+    cur, _ = group_fields(text)
+    if cur:
+        return text
+    dep_line = "N/A" if not deps else ", ".join(deps)
+    return text.replace(
+        "## 讨论与决策\n",
+        f"## 讨论与决策\n\n任务组: {gid}\n前置任务: {dep_line}\n", 1,
+    )
+
+
+def write_entry(entry: Path, text: str) -> None:
+    spec_path(entry).write_text(text, encoding="utf-8")
+
+
+def _exclude_board(root: Path) -> None:
+    """把看板目录加进主 worktree 的 .git/info/exclude (Onevoke 同款: 本地排除,
+    不改 .gitignore, 不提交)。这样 git status 不会把 kanban/ 显示为未跟踪,
+    审核前置条件 (worktree 干净) 才能满足。"""
+    try:
+        main = None
+        out = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        for line in out.stdout.splitlines():
+            if line.startswith("worktree "):
+                main = Path(line[len("worktree "):].strip())
+                break
+        if not main:
+            return
+        git_dir = subprocess.run(
+            ["git", "-C", str(main), "rev-parse", "--git-dir"],
+            capture_output=True, text=True, check=False, timeout=10,
+        ).stdout.strip()
+        exclude = Path(git_dir) / "info" / "exclude"
+        if not exclude.is_file():
+            return
+        entry = "kanban/"
+        text = exclude.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        changed = False
+        for extra in ("kanban/", ".dsh-onevoke.yml", ".dsh-onevoke.local.yml"):
+            if extra not in lines:
+                lines.append(extra)
+                changed = True
+        if changed:
+            exclude.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass  # 非 git 项目或排除失败不致命
+
+
+def cmd_init(args) -> int:
+    root = Path(args[0]).resolve() if args else board_root()
+    ensure_board(root)
+    _exclude_board(root)
+    print(f"看板就绪: {root}")
+    print("状态目录: " + ", ".join(STATES))
+    return 0
+
+
+def cmd_list(args) -> int:
+    root = board_root()
+    mobile = "--mobile" in args
+    states = [a for a in args if a in STATES]
+    for state in states or list(STATES):
+        state_dir = root / state
+        rows = []
+        if state_dir.is_dir():
+            for entry in sorted(state_dir.iterdir()):
+                if entry.is_file() and entry.suffix == ".md":
+                    large = False
+                    target = entry
+                elif entry.is_dir() and (entry / "spec.md").is_file():
+                    large = True
+                    target = entry / "spec.md"
+                else:
+                    continue
+                text = read_any_text(target)
+                m = re.search(r"^- 类型:\s*(.+)$", text, re.M)
+                t = m.group(1).strip() if m else "?"
+                m = re.search(r"^- (开始时间|完成时间):\s*(.+)$", text, re.M)
+                ts = m.group(2).strip() if m else ""
+                mark = " [large]" if large else ""
+                rows.append((entry_id(entry), card_title(text), t + mark, ts))
+        if not rows:
+            continue
+        print(f"[{state}] ({len(rows)})")
+        for task_id, title, t, ts in rows:
+            if mobile:
+                print(f"  {task_id}  {title} [{t}] {ts}")
+            else:
+                print(f"  {task_id}  {title}  [{t}] {ts}")
+    return 0
+
+
+def cmd_show(args) -> int:
+    if not args:
+        raise KanbanError("kanban show 需要 <task-id>")
+    root = board_root()
+    _, entry = find_card(root, args[0])
+    dump_card(entry)
+    return 0
+
+
+def cmd_new(args) -> int:
+    large = "--large" in args
+    gid = None
+    deps = []
+    review = "standard"  # 审核等级: light | standard | full (默认标准)
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--group":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--group 需要 <group-id>")
+            gid = args[i]
+        elif a == "--deps":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--deps 需要 <task-id,...>")
+            deps = [d.strip() for d in re.split(r"[,，]", args[i]) if d.strip()]
+        elif a == "--review":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--review 需要 light|standard|full")
+            review = args[i]
+            if review not in ("light", "standard", "full"):
+                raise KanbanError("--review 只能是 light|standard|full (轻量|标准|完整)")
+        elif a == "--large":
+            pass  # 已由 large = "--large" in args 处理
+        elif a.startswith("--"):
+            raise KanbanError(f"未知选项: {a}")
+        else:
+            rest.append(a)
+        i += 1
+    if len(rest) < 3:
+        raise KanbanError("kanban new 需要: <feature|bug|chore|research> <slug> <标题...>")
+    kind, slug, title = rest[0], rest[1], " ".join(rest[2:])
+    if kind not in TYPES:
+        raise KanbanError(f"类型必须为 {'/'.join(TYPES)}")
+    if not SLUG_RE.match(slug):
+        raise KanbanError("slug 只含小写字母/数字/连字符")
+    task_id = f"{today()}-{slug}-task"
+    if gid:
+        if not GROUP_ID_RE.match(gid):
+            raise KanbanError(f"任务组 ID 格式错误: {gid} (应形如 {today()}-short-slug-group)")
+        for d in deps:
+            if not TASK_ID_RE.match(d):
+                raise KanbanError(f"前置任务 ID 格式错误: {d}")
+    root = board_root()
+    ensure_board(root)
+    for _, entry in iter_entries(root):
+        if entry_id(entry) == task_id:
+            raise KanbanError(f"任务 ID 已存在: {task_id}")
+    text = template_card(title, kind)
+    review_label = {"light": "轻量", "standard": "标准", "full": "完整"}[review]
+    text = text.replace("- 审核: 标准", f"- 审核: {review_label}", 1)
+    if gid:
+        text = stamp_group(text, gid, deps)
+    if large:
+        target = root / "backlog" / task_id
+        target.mkdir()
+        (target / "spec.md").write_text(text, encoding="utf-8")
+        print(f"已创建大任务: {target}/ (spec.md 已生成; 按需建 plan.md)")
+    else:
+        target = root / "backlog" / f"{task_id}.md"
+        target.write_text(text, encoding="utf-8")
+        print(f"已创建: {target}")
+    if gid:
+        print(f"任务组: {gid}  前置任务: {'N/A' if not deps else ', '.join(deps)}")
+    print("立即用已确认内容填完整张卡 (不留 <填写>), 再 kanban pick。")
+    return 0
+
+
+def cmd_upgrade(args) -> int:
+    if not args:
+        raise KanbanError("kanban upgrade 需要 <task-id>")
+    root = board_root()
+    state, entry = find_card(root, args[0])
+    if is_large(entry):
+        print(f"{args[0]} 已是大任务")
+        return 0
+    if state not in ("backlog", "working"):
+        raise KanbanError(f"只有 backlog 或 working 中的小任务可以升级 (当前 {state})")
+    text = read_card(entry)
+    target = root / state / args[0]
+    if target.exists():
+        raise KanbanError(f"目标已存在: {target}")
+    target.mkdir()
+    (target / "spec.md").write_text(text, encoding="utf-8")
+    entry.unlink()
+    print(f"{args[0]}: 小任务 -> 大任务 (原内容已转入 spec.md, 原文件已删除)")
+    print("按需创建 plan.md; 完成时创建 report.md。")
+    return 0
+
+
+def cmd_pick(args) -> int:
+    root = board_root()
+    if not args:
+        candidates = [entry_id(e) for s, e in iter_entries(root) if s == "backlog"]
+        if not candidates:
+            print("backlog 没有候选卡")
+            return 0
+        print("候选 (backlog):")
+        for c in sorted(candidates):
+            print(f"  {c}")
+        return 0
+    state, entry = find_card(root, args[0])
+    if state != "backlog":
+        raise KanbanError(f"{args[0]} 不在 backlog (当前 {state})")
+    text = read_card(entry)
+    problems = validate_contract(text, args[0])
+    if problems:
+        raise KanbanError("契约不完整:\n  " + "\n  ".join(problems))
+    os.rename(entry, root / "todo" / entry.name)
+    print(f"{args[0]} -> todo (契约已校验)")
+    return 0
+
+
+def resolve_dsh() -> list:
+    exe = shutil.which("dsh")
+    if exe:
+        return [exe]
+    npx = shutil.which("npx")
+    if npx:
+        return [npx, "--yes", "dsh"]
+    return []
+
+
+def task_prompt(task_id: str, title: str, entry: Path) -> str:
+    return (
+        f"看板任务 {task_id} - {title}。"
+        f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
+        f"然后按技能流程实现该任务 (worktree + 分支 + 提交 + 审核 + 请求验收)。"
+        f"本任务在独立会话中执行; 会话恢复 id 见 TUI 退出提示, 结束时把它记入卡片"
+        f"「讨论与决策」(格式: 会话: <id>)。"
+    )
+
+
+REVIEW_LEVELS = {"轻量": "light", "标准": "standard", "完整": "full",
+                 "light": "light", "standard": "standard", "full": "full"}
+
+
+def review_level(text: str) -> str:
+    """读卡片 `- 审核:` 元数据, 返回 light|standard|full (默认 standard)."""
+    m = re.search(r"^- 审核:\s*(轻量|标准|完整|light|standard|full)\s*$", text, re.M)
+    if m:
+        return REVIEW_LEVELS[m.group(1)]
+    return "standard"
+
+
+def cmd_resume(args) -> int:
+    """kanban resume <task-id> — 恢复卡片记录的会话 (崩溃/中断后续跑)."""
+    if not args:
+        raise KanbanError("kanban resume 需要 <task-id>")
+    root = board_root()
+    state, entry = find_card(root, args[0])
+    text = read_card(entry)
+    m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+    if not m:
+        raise KanbanError(f"{args[0]} 卡片没有会话记录 (可能是手动启动的任务, 没有稳定会话 id)")
+    session_id = m.group(1).strip()
+    dsh = resolve_dsh()
+    if not dsh:
+        print(f"未找到 dsh CLI。手动恢复:")
+        print(f"  dsh --profile tui --resume={session_id}")
+        return 0
+    launch_cmd = f"{' '.join(dsh)} --profile tui --resume={session_id}"
+    if os.environ.get("TMUX") and shutil.which("tmux"):
+        win = f"kb-{entry_id(entry).split('-', 1)[1].rsplit('-task', 1)[0]}-r"
+        shell_cmd = f"bash -lc '{launch_cmd}; echo; echo [会话已退出, 窗口保持打开]; exec bash'"
+        r = subprocess.run(
+            ["tmux", "new-window", "-d", "-n", win, shell_cmd],
+            capture_output=True, text=True, check=False, timeout=15,
+        )
+        if r.returncode == 0:
+            print(f"已在 tmux window [{win}] 恢复会话: {session_id}")
+            return 0
+    print(f"请在新终端恢复任务会话:")
+    print(f"  {launch_cmd}")
+    print("然后粘贴: 继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。")
+    return 0
+
+
+def check_deps(root: Path, text: str, task_id: str) -> list:
+    """返回未满足的前置任务列表 (全 done 才算满足)."""
+    gid, deps = group_fields(text)
+    if not deps:
+        return []
+    missing = []
+    for d in deps:
+        st, _ = find_card_any(root, d)
+        if st != "done":
+            missing.append(f"{d} (当前 {st or '不存在'})")
+    return missing
+
+
+def _tmux_session() -> str:
+    out = subprocess.run(
+        ["tmux", "display-message", "-p", "#S"],
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def _tmux_window_index(win: str):
+    """在当前 tmux 会话里按窗口名找索引 (裸窗口名不能直接做 target)."""
+    out = subprocess.run(
+        ["tmux", "list-windows", "-F", "#{window_index} #{window_name}"],
+        capture_output=True, text=True, check=False, timeout=10,
+    )
+    if out.returncode != 0:
+        return None
+    for line in out.stdout.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) == 2 and parts[1] == win:
+            return parts[0]
+    return None
+
+
+def _find_project_config() -> Path:
+    """从当前目录向上找 .dsh-onevoke.yml (项目级配置, 可提交 git)."""
+    d = Path.cwd()
+    for _ in range(6):
+        f = d / ".dsh-onevoke.yml"
+        if f.is_file():
+            return f
+        if d.parent == d:
+            break
+        d = d.parent
+    return None
+
+
+def _parse_project_config():
+    """解析 .dsh-onevoke.yml (轻量 YAML, 三层):
+      model:     执行模型  {provider, model}
+      plan:      规划模型  {provider, model}  (需求分析/填卡的主会话建议模型)
+      review:    审核通用  {provider, model}
+      reviewers: 审核按角色 {PM/QA/CSA/Hacker: {provider, model}}
+    返回 dict; 缺省键不存在."""
+    f = _find_project_config()
+    if f is None:
+        return {}
+    try:
+        text = f.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    cfg = {}
+    section = None      # 顶层: model / plan / review / reviewers / ...
+    subsection = None   # reviewers 下的角色
+    for line in text.splitlines():
+        if line.strip() == "" or line.strip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        m = re.match(r"([A-Za-z_]+):\s*(.*)$", line.strip())
+        if m is None:
+            continue
+        key, val = m.group(1), m.group(2).strip().strip("\"'")
+        if indent == 0:
+            section = key
+            subsection = None
+            continue
+        if section == "reviewers" and indent == 2:
+            subsection = key  # 角色段
+            continue
+        if section == "reviewers" and indent >= 4 and subsection:
+            cfg.setdefault("reviewers", {}).setdefault(subsection, {})[key] = val
+            continue
+        if indent == 2 and section in ("model", "plan", "review", "permission"):
+            cfg.setdefault(section, {})[key] = val
+    return cfg
+
+
+def _load_project_model():
+    """兼容旧调用: 从项目配置取执行模型 (provider, model) 或 None."""
+    cfg = _parse_project_config()
+    m = cfg.get("model")
+    if m and m.get("provider") and m.get("model"):
+        return m["provider"], m["model"]
+    return None
+
+
+def _ensure_session(session_id: str, cwd: str) -> bool:
+    """按官方格式预建 DSH 会话 (kb-<task-id>), 让 --resume 可用. 失败返回 False."""
+    node = shutil.which("node")
+    helper = Path(__file__).resolve().parent / "create-session.mjs"
+    if not node or not helper.exists():
+        return False
+    try:
+        r = subprocess.run(
+            [node, str(helper), session_id, cwd],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def cmd_start(args) -> int:
+    no_window = "--no-window" in args
+    ignore_deps = "--ignore-deps" in args
+    ids = [a for a in args if not a.startswith("--")]
+    if not ids:
+        raise KanbanError("kanban start 需要 <task-id>")
+    root = board_root()
+    state, entry = find_card(root, ids[0])
+    if state != "todo":
+        raise KanbanError(f"{ids[0]} 不在 todo (当前 {state}); 先 kanban pick")
+    text = read_card(entry)
+    problems = validate_contract(text, ids[0])
+    if problems:
+        raise KanbanError("契约不完整:\n  " + "\n  ".join(problems))
+    if not ignore_deps:
+        missing = check_deps(root, text, ids[0])
+        if missing:
+            raise KanbanError(
+                f"{ids[0]} 的前置任务未全部完成: " + ", ".join(missing)
+                + " (全部进入 done 后才能启动; 用户明确要求可加 --ignore-deps)"
+            )
+
+    owner = os.environ.get("USER") or os.environ.get("USERNAME") or "agent"
+    updated = re.sub(r"^- 负责人:.*$", f"- 负责人: {owner}", text, count=1, flags=re.M)
+    updated = re.sub(r"^- 开始时间:.*$", f"- 开始时间: {now()}", updated, count=1, flags=re.M)
+    write_entry(entry, updated)
+    target = root / "working" / entry.name
+    os.rename(entry, target)
+    print(f"{ids[0]} -> working (负责人: {owner}, 开始时间: {now()})")
+
+    # 拉起新 DSH 会话执行该任务 (任务 = 独立会话, 稳定 id = kb-<task-id>).
+    # --resume 只能恢复已存在的会话, 所以先用 create-session.mjs 按官方格式预建
+    # 空会话 (已存在则跳过), 再 --resume; 预建失败则回退全新 UUID 会话.
+    dsh = resolve_dsh()
+    if not dsh:
+        print(f"未找到 dsh CLI。手动启动新会话:")
+        print("  dsh --profile tui")
+        print(f"然后粘贴任务 prompt: {task_prompt(ids[0], card_title(updated), target)}")
+        return 0
+    session_id = f"kb-{ids[0]}"
+    stable = _ensure_session(session_id, str(Path.cwd().resolve()))
+    # 稳定 id 记入卡片「讨论与决策」(幂等)
+    if stable:
+        text2 = read_card(target)
+        body = section_body(text2, "讨论与决策")
+        if not re.search(r"^会话:\s*\S+", body, re.M):
+            text2 = text2.replace(
+                "## 讨论与决策\n",
+                f"## 讨论与决策\n\n会话: {session_id}\n", 1,
+            )
+            write_entry(target, text2)
+    prompt = task_prompt(ids[0], card_title(updated), target)
+    # 项目级配置: .dsh-onevoke.yml (按项目隔离, 可提交 git)
+    cfg = _parse_project_config()
+    pm = cfg.get("model")
+    if pm and pm.get("provider") and pm.get("model"):
+        pm_provider, pm_model = pm["provider"], pm["model"]
+        prompt += f" 本任务执行模型: {pm_provider}/{pm_model} (来自项目 .dsh-onevoke.yml)。"
+    else:
+        pm = None
+    plan_cfg = cfg.get("plan")
+    # 审核等级 (卡 `- 审核:` 字段, kanban new --review 设定)
+    rlevel = review_level(updated)
+    rlabel = {"light": "轻量", "standard": "标准", "full": "完整"}[rlevel]
+    prompt += (f" 本任务审核等级: {rlabel} ({rlevel})。"
+               f"轻量=只跑 PM 或自审并记录, 跳过 QA/CSA/Hacker; "
+               f"标准=PM → QA, CSA/Hacker 按触发条件; 完整=PM → CSA/Hacker → QA 全跑。")
+    # 任务会话沙箱: 默认 danger-full-access (Onevoke 同款免确认), 项目可覆盖
+    perm = (cfg.get("permission") or {}).get("mode", "danger-full-access")
+    if perm not in ("read-only", "workspace-write", "danger-full-access"):
+        perm = "danger-full-access"
+    env_prefix = f"DSH_PERMISSION_MODE={perm} "
+    launch = [*dsh, "--profile", "tui"] + ([f"--resume={session_id}"] if stable else [])
+    launch_cmd = env_prefix + " ".join(launch)
+    if no_window or not (os.environ.get("TMUX") and shutil.which("tmux")):
+        print(f"请在新终端启动任务会话:")
+        print(f"  {launch_cmd}")
+        if pm:
+            print(f"项目执行模型: 先执行 /model {pm_provider}/{pm_model} 再粘贴任务 prompt")
+        print("然后粘贴:")
+        print(f"  {prompt}")
+        if plan_cfg and plan_cfg.get("provider") and plan_cfg.get("model"):
+            print(f"规划模型: {plan_cfg['provider']}/{plan_cfg['model']} (下一个需求的分析/填卡阶段请在主会话用 /model 切换)")
+        if stable:
+            print(f"会话 id 稳定: {session_id} (恢复: dsh --profile tui --resume={session_id})")
+        else:
+            print("恢复: TUI 内 /resume 按标题选会话, 或按退出提示的 id 用 --resume=<id>")
+        return 0
+
+    # tmux 模式: 新建 kb-<slug> window 跑 TUI, 注入任务 prompt.
+    # 用 bash -lc 包装: dsh 退出后窗口保持打开 (tmux 默认 remain-on-exit off
+    # 会在命令退出时自动关窗, 导致 send-keys 找不到 pane).
+    slug = ids[0].split("-", 1)[1].rsplit("-task", 1)[0]
+    win = f"kb-{slug}"
+    shell_cmd = f"bash -lc '{launch_cmd}; echo; echo [任务会话已退出, 窗口保持打开; 恢复: dsh --profile tui --resume={session_id if stable else '<id>'}]; exec bash'"
+    r = subprocess.run(
+        ["tmux", "new-window", "-d", "-n", win, shell_cmd],
+        capture_output=True, text=True, check=False, timeout=15,
+    )
+    if r.returncode != 0:
+        print(f"tmux 启动失败 ({r.stderr.strip() or r.stdout.strip()}); 请手动运行:")
+        print(f"  {launch_cmd}")
+        print(f"然后粘贴: {prompt}")
+        return 1
+    # 用「会话:窗口索引」定位 (裸窗口名会被 tmux 当会话名解析)
+    session = _tmux_session()
+    idx = _tmux_window_index(win)
+    if not session or idx is None:
+        print(f"窗口 [{win}] 未创建成功或已退出 (dsh 可能启动失败); 请手动运行:")
+        print(f"  {launch_cmd}")
+        print(f"然后粘贴: {prompt}")
+        return 1
+    target = f"{session}:{idx}"
+    # 等 TUI 就绪 (输入提示 "dsh >" 出现) 再注入, 否则按键会在 TUI 启动阶段丢失
+    ready = False
+    for _ in range(25):  # 最多 ~50s
+        time.sleep(2)
+        cap = subprocess.run(
+            ["tmux", "capture-pane", "-t", target, "-p"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        if cap.returncode == 0 and ("dsh >" in cap.stdout or "dsh>" in cap.stdout):
+            ready = True
+            break
+    if not ready:
+        print(f"窗口 [{win}] 的 TUI 未在预期时间内就绪, prompt 未注入;")
+        print(f"请切到该窗口手动粘贴任务 prompt:")
+        print(f"  {prompt}")
+        return 0
+    if pm:
+        # 项目级模型: 先执行 /model 切换会话模型, 再注入任务 prompt
+        subprocess.run(["tmux", "send-keys", "-t", target, "-l", f"/model {pm_provider}/{pm_model}"],
+                       check=False, timeout=10)
+        subprocess.run(["tmux", "send-keys", "-t", target, "Enter"],
+                       check=False, timeout=10)
+        time.sleep(3)
+    subprocess.run(["tmux", "send-keys", "-t", target, "-l", prompt],
+                   check=False, timeout=10)
+    subprocess.run(["tmux", "send-keys", "-t", target, "Enter"],
+                   check=False, timeout=10)
+    print(f"已在 tmux window [{win}] 启动任务会话, prompt 已注入"
+          + (f", 模型已切换 {pm_provider}/{pm_model}" if pm else ""))
+    print("QuickTUI 可直接 attach 查看。")
+    if stable:
+        print(f"会话 id 稳定: {session_id} (恢复: dsh --profile tui --resume={session_id})")
+    else:
+        print("恢复: TUI 内 /resume 按标题选会话, 或按退出提示的 id 用 --resume=<id>")
+    return 0
+
+
+def cmd_move(args) -> int:
+    if len(args) != 2:
+        raise KanbanError("kanban move 需要: <task-id> <state>")
+    task_id, state = args
+    if state not in STATES:
+        raise KanbanError(f"目标状态必须是 {'/'.join(STATES)}")
+    root = board_root()
+    cur, entry = find_card(root, task_id)
+    if cur == state:
+        print(f"{task_id} 已在 {state}")
+        return 0
+    allowed = {
+        "backlog": ("todo", "archived", "trash"),
+        "todo": ("working", "archived", "trash"),
+        "working": ("done", "archived", "trash"),
+        "done": ("archived", "trash"),
+        "archived": ("trash",),
+        "trash": (),
+    }
+    if state not in allowed[cur]:
+        raise KanbanError(f"非法迁移: {cur} -> {state} (允许: {'/'.join(allowed[cur]) or '无'})")
+    if state == "done":
+        text = read_card(entry)
+        if not re.search(r"^- 结果:\s*completed\s*$", text, re.M):
+            raise KanbanError("进 done 前须填 `结果: completed`")
+        summary = section_body(text, "完成总结")
+        summary_ok = bool(summary) and not has_placeholder(summary)
+        report_ok = is_large(entry) and (entry / "report.md").exists() \
+            and read_any_text(entry / "report.md").strip()
+        if not summary_ok and not report_ok:
+            raise KanbanError("进 done 前须填「完成总结」或大任务的非空 report.md")
+        text = re.sub(r"^- 完成时间:.*$", f"- 完成时间: {now()}", text, count=1, flags=re.M)
+        write_entry(entry, text)
+    if state == "trash":
+        print("提示: trash 仅限用户明确要求删除; 确认后执行。")
+    os.rename(entry, root / state / entry.name)
+    print(f"{task_id}: {cur} -> {state}")
+    return 0
+
+
+def cmd_group(args) -> int:
+    if not args:
+        raise KanbanError("kanban group 需要 <group-id>")
+    gid = args[0]
+    root = board_root()
+    members = []
+    for state, entry in iter_entries(root):
+        g, deps = group_fields(read_card(entry))
+        if g == gid:
+            members.append((state, entry, deps))
+    if not members:
+        print(f"任务组 {gid} 没有成员")
+        return 0
+    print(f"任务组 {gid} ({len(members)} 张卡):")
+    all_done = True
+    for state, entry, deps in sorted(members, key=lambda m: m[1].name):
+        ready = bool(deps) and all(
+            find_card_any(root, d)[0] == "done" for d in deps
+        )
+        if not deps:
+            ready = True
+        if state != "done":
+            all_done = False
+        dep_str = "N/A" if not deps else ", ".join(deps)
+        ready_str = "就绪" if ready and state == "todo" else ""
+        print(f"  {state:9s} {entry_id(entry)}  前置: {dep_str}  {ready_str}")
+    print("整组完成: " + ("是" if all_done else "否"))
+    return 0
+
+
+def cmd_web(args) -> int:
+    """kanban web [--port <n>] [--bind <ip>] — 看板状态服务 (HTML 页面 + JSON API)."""
+    port, bind = 8090, "0.0.0.0"
+    i = 0
+    while i < len(args):
+        if args[i] == "--port":
+            i += 1
+            port = int(args[i])
+        elif args[i] == "--bind":
+            i += 1
+            bind = args[i]
+        else:
+            raise KanbanError(f"未知选项: {args[i]}")
+        i += 1
+
+    def board_json():
+        root = board_root()
+        states = {}
+        for state in STATES:
+            rows = []
+            state_dir = root / state
+            if state_dir.is_dir():
+                for entry in sorted(state_dir.iterdir()):
+                    if entry.is_file() and entry.suffix == ".md":
+                        large = False
+                        target = entry
+                    elif entry.is_dir() and (entry / "spec.md").is_file():
+                        large = True
+                        target = entry / "spec.md"
+                    else:
+                        continue
+                    text = read_any_text(target)
+                    gid, deps = group_fields(text)
+                    m = re.search(r"^- 类型:\s*(.+)$", text, re.M)
+                    t = m.group(1).strip() if m else ""
+                    m = re.search(r"^- (开始时间|完成时间):\s*(.+)$", text, re.M)
+                    ts = m.group(2).strip() if m else ""
+                    m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+                    sess = m.group(1) if m else ""
+                    rows.append({
+                        "id": entry_id(entry), "title": card_title(text),
+                        "type": t, "time": ts, "large": large,
+                        "group": gid, "deps": deps, "session": sess,
+                    })
+            states[state] = rows
+        return {"board": root.as_posix(), "states": states}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *a):  # 安静
+            pass
+
+        def _send(self, code, body, ctype):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path == "/api/board":
+                data = json.dumps(board_json(), ensure_ascii=False).encode("utf-8")
+                return self._send(200, data, "application/json; charset=utf-8")
+            if path.startswith("/api/card/"):
+                tid = path[len("/api/card/"):]
+                root = board_root()
+                try:
+                    _, entry = find_card(root, tid)
+                    body = read_any_text(spec_path(entry))
+                except KanbanError:
+                    return self._send(404, b'{"error":"not found"}', "application/json")
+                return self._send(200, body.encode("utf-8"), "text/plain; charset=utf-8")
+            if path == "/":
+                page = render_board_html(board_json())
+                return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            self._send(404, b"not found", "text/plain")
+
+    def render_board_html(data) -> str:
+        def esc(s):
+            return html.escape(str(s))
+
+        cols = []
+        for state in STATES:
+            rows = data["states"][state]
+            cards = ""
+            for r in rows:
+                marks = []
+                if r["large"]:
+                    marks.append("large")
+                if r["group"]:
+                    marks.append(f"组 {esc(r['group'])}")
+                if r["session"]:
+                    marks.append(f"会话 {esc(r['session'])}")
+                deps = f" 前置: {esc(', '.join(r['deps']))}" if r["deps"] else ""
+                cards += (
+                    f'<div class="card"><div class="cid">{esc(r["id"])}</div>'
+                    f'<div class="ct">{esc(r["title"])}</div>'
+                    f'<div class="cm">[{esc(r["type"])}] {esc(r["time"])}'
+                    + (f" {' '.join(marks)}" if marks else "")
+                    + f"{deps}</div></div>"
+                )
+            cols.append(
+                f'<section class="col"><h2>{state} <span class="n">{len(rows)}</span></h2>{cards or "<p class=empty>空</p>"}</section>'
+            )
+        return f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>看板 · {esc(data['board'])}</title>
+<style>
+body{{background:#121212;color:#e8e8e8;font:14px/1.5 system-ui;margin:0;padding:16px}}
+h1{{font-size:18px}} .cols{{display:flex;gap:12px;flex-wrap:wrap}}
+.col{{flex:1 1 260px;background:#1c1c1c;border-radius:10px;padding:12px}}
+h2{{font-size:14px;margin:0 0 8px;color:#9adcff}} .n{{color:#888}}
+.card{{background:#242424;border-radius:8px;padding:8px 10px;margin:6px 0}}
+.cid{{font-size:11px;color:#7ee787}} .ct{{font-weight:600}} .cm{{color:#aaa;font-size:12px}}
+.empty{{color:#555}} a{{color:#9adcff}}
+</style></head><body>
+<h1>看板 · {esc(data['board'])}</h1>
+<div class="cols">{''.join(cols)}</div>
+<p style="color:#666">每 10 秒自动刷新 · <a href="/api/board">JSON</a></p>
+<script>setTimeout(()=>location.reload(),10000)</script>
+</body></html>"""
+
+    print(f"看板状态服务: http://{bind}:{port}  (Ctrl+C 停止)")
+    try:
+        ThreadingHTTPServer((bind, port), Handler).serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def validate_groups(root: Path) -> list:
+    """全局任务组校验: 组 ID 格式/一致性/引用存在/同组/无自引用/无环."""
+    problems = []
+    by_id = {}
+    for state, entry in iter_entries(root):
+        by_id[entry_id(entry)] = (state, entry)
+    records = {}
+    for task_id, (state, entry) in by_id.items():
+        gid, deps = group_fields(read_card(entry))
+        has_dep_line = bool(re.search(r"^前置任务:\s*(\S.*)?$",
+                                      section_body(read_card(entry), "讨论与决策"),
+                                      re.M))
+        if gid or deps or has_dep_line:
+            records[task_id] = (gid, deps)
+        if gid and not GROUP_ID_RE.match(gid):
+            problems.append(f"[{state}] {task_id}: 任务组 ID 格式错误: {gid}")
+        if deps and not gid:
+            problems.append(f"[{state}] {task_id}: 有前置任务但缺「任务组」行")
+        if gid and not deps and not has_dep_line:
+            problems.append(f"[{state}] {task_id}: 有「任务组」但缺「前置任务」行")
+    for task_id, (gid, deps) in records.items():
+        for d in deps:
+            if d == task_id:
+                problems.append(f"{task_id}: 不能前置自己")
+                continue
+            other = by_id.get(d)
+            if other is None:
+                problems.append(f"{task_id}: 前置任务不存在: {d}")
+                continue
+            other_gid, _ = records.get(d, (None, []))
+            if gid and other_gid and gid != other_gid:
+                problems.append(f"{task_id}: 前置任务 {d} 属于其他任务组 ({other_gid})")
+    # 环检测
+    visiting, visited = set(), set()
+    def dfs(tid, chain):
+        if tid in visiting:
+            problems.append("任务组存在依赖环: " + " -> ".join(chain + [tid]))
+            return
+        if tid in visited:
+            return
+        visiting.add(tid)
+        _, deps = records.get(tid, (None, []))
+        for d in deps:
+            if d in records:
+                dfs(d, chain + [tid])
+        visiting.discard(tid)
+        visited.add(tid)
+    for tid in records:
+        dfs(tid, [])
+    return problems
+
+
+def cmd_check(args) -> int:
+    root = board_root()
+    problems = []
+    seen = {}
+    for state, entry in iter_entries(root):
+        task_id = entry_id(entry)
+        # archived/trash 是归档记录, 豁免 ID 格式校验 (遗留旧格式卡可归档留档);
+        # 活跃状态 (backlog/todo/working/done) 严格符合 YYYYMMDD-slug-task.
+        if not TASK_ID_RE.match(task_id) and state not in ("archived", "trash"):
+            problems.append(f"[{state}] 任务 ID 格式错误: {entry.name}")
+        if task_id in seen:
+            problems.append(f"[{state}] 重复任务 ID: {task_id} (另见 {seen[task_id]})")
+        else:
+            seen[task_id] = str(entry)
+        text = read_card(entry)
+        if state in ("todo", "working"):
+            problems += validate_contract(text, task_id)
+        if state == "done":
+            if not re.search(r"^- 结果:\s*completed\s*$", text, re.M):
+                problems.append(f"[done] {task_id} 缺 `结果: completed`")
+            summary = section_body(text, "完成总结")
+            summary_ok = bool(summary) and not has_placeholder(summary)
+            report_ok = is_large(entry) and (entry / "report.md").exists() \
+                and read_any_text(entry / "report.md").strip()
+            if not summary_ok and not report_ok:
+                problems.append(f"[done] {task_id} 缺「完成总结」或 report.md")
+    problems += validate_groups(root)
+    if problems:
+        print("看板存在问题:")
+        for p in problems:
+            print(f"  - {p}")
+        return 1
+    print("看板 OK")
+    return 0
+
+
+def main(argv) -> int:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return 0 if argv else 1
+    cmd, args = argv[0], argv[1:]
+    try:
+        if cmd == "init":
+            return cmd_init(args)
+        if cmd == "list":
+            return cmd_list(args)
+        if cmd == "show":
+            return cmd_show(args)
+        if cmd == "new":
+            return cmd_new(args)
+        if cmd == "upgrade":
+            return cmd_upgrade(args)
+        if cmd == "pick":
+            return cmd_pick(args)
+        if cmd == "start":
+            return cmd_start(args)
+        if cmd == "resume":
+            return cmd_resume(args)
+        if cmd == "move":
+            return cmd_move(args)
+        if cmd == "group":
+            return cmd_group(args)
+        if cmd == "web":
+            return cmd_web(args)
+        if cmd == "check":
+            return cmd_check(args)
+        raise KanbanError(f"未知命令: {cmd}")
+    except KanbanError as exc:
+        print(f"kanban: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("已中断", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

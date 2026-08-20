@@ -1,0 +1,24 @@
+{
+  "name": "dsh-onevoke",
+  "version": "0.2.0",
+  "description": "Onevoke-style kanban workflow as a DeepSeek Harness profile bundle: file board + one DSH session per task + worktree/review gates + tiered review + per-project models. Borrows Onevoke's ideas, depends on nothing from the onevoke repo.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "files": [
+    "cordis.patch.yml",
+    "skills",
+    "bin",
+    "install.sh",
+    "README.md",
+    "DESIGN.md",
+    "PLAYBOOK.md",
+    "TEST-NOTES.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

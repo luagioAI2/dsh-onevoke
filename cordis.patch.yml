@@ -1,0 +1,40 @@
+# dsh-onevoke bundle patch — a thin profile layer over @deepseek-ai/dsh-base
+# + the surface bundle (tui/web/headless).
+#
+# Patch semantics (from @deepseek-ai/dsh-app-boot applyEntryPatches):
+# - A patch REPLACES the targeted row's whole `config`; restate every key you own.
+# - `insert` appends rows to the root entry list (or into a group by id).
+# - `!!js <expr>` expressions are evaluated at entry activation.
+# - Layer order: bundle layers (in dsh.profile.bundles order) -> profile
+#   cordis.patch.yml -> $DSH_HOME/cordis.patch.yml -> --patch overlays; the
+#   last write wins per row, so this layer must restate rows it overrides.
+#
+# Deliberately thin: the workflow contract lives in skills/onevoke (loaded on
+# demand via the skill tool) and bin/kanban + bin/onevoke-review (installed by
+# install.sh). Config rows here only make room for rules and point the agent
+# at the skill.
+
+# ── rows this bundle overrides ────────────────────────────────────────────
+
+# The tui surface persona, restated verbatim, plus one workflow pointer.
+# Drop this block if a future @dsh-tui version changes its persona and you
+# want to track it exactly — the skill is still discovered automatically.
+- id: system-prompt
+  config:
+    persona: |
+      You are a coding agent powered by the {{model}} model.
+
+      Verify your work by running the code or tests. Keep answers brief and
+      factual.
+
+      Task management runs through the Onevoke workflow: when the user brings
+      a requirement or task and it should follow the kanban process, load the
+      `onevoke` skill first (skill tool) and obey it — file board, one DSH
+      session per task, git worktree + branch commits, PM/QA review gates,
+      user acceptance before integration.
+
+# Room for rules: the always-on AGENTS.md baseline plus project files can
+# exceed the 64 KiB default budget.
+- id: agent-instructions
+  config:
+    maxBytes: 131072
