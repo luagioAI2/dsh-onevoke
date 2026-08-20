@@ -698,13 +698,17 @@ def resolve_dsh() -> list:
 
 def task_prompt(task_id: str, title: str, entry: Path) -> str:
     board = entry.parent.parent
+    project = board.parent
     rules = board / "RULES.md"
     mem = board / "MEMORY.md"
+    arch = project / "docs" / "architecture.md"
     notes = []
     if rules.exists():
         notes.append(f" 若 {rules} 存在, 先读它(项目看板规则, 优先级高于通用技能)。")
     if mem.exists():
         notes.append(f" 若 {mem} 存在, 先读它(跨任务记忆, 参考以往经验与决策)。")
+    if arch.exists():
+        notes.append(f" 若 {arch} 存在, 先读它(技术方案, 实现应遵循其设计; 有出入先说明再偏离)。")
     return (
         f"看板任务 {task_id} - {title}。"
         f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
