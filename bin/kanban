@@ -585,7 +585,16 @@ def _tmux_window_index(win: str):
 
 
 def _find_project_config() -> Path:
-    """从当前目录向上找 .dsh-onevoke.yml (项目级配置, 可提交 git)."""
+    """定位项目配置, 优先级:
+      1) <看板目录>/.dsh-onevoke.yml (本地跟随看板; kanban/ 本来就排除 git, 天然个人)
+      2) 从当前目录向上找项目根 .dsh-onevoke.yml (可提交 git 团队共享)
+    返回 Path 或 None."""
+    try:
+        board = board_root() / ".dsh-onevoke.yml"
+        if board.is_file():
+            return board
+    except Exception:
+        pass
     d = Path.cwd()
     for _ in range(6):
         f = d / ".dsh-onevoke.yml"
