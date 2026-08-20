@@ -44,7 +44,8 @@ USAGE = """用法:
   kanban init [path] [--agents]           幂等创建看板和 6 个状态目录; --agents 另给项目 AGENTS.md 写 opt-in 入口
   kanban list [state] [--mobile]           列出卡片 (默认全部状态; 大任务标 [large])
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
-  kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] <feature|bug|chore|research> <slug> <标题...>
+  kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
+  kanban req-status [需求文档]           核对需求文档 REQ 条目与看板卡状态 (默认 docs/requirements.md)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
   kanban start [--no-window] [--ignore-deps] [task-id]
                                            todo -> working 并拉起新 DSH 会话 (校验依赖)
@@ -462,11 +463,65 @@ def cmd_show(args) -> int:
     return 0
 
 
+REQ_HEAD_RE = re.compile(r"^##\s+(REQ-\d+)\s+(.+)$", re.M)
+
+
+def _parse_reqs(path: Path):
+    """解析需求文档 -> {REQ-ID: {title, fields}}.
+    约定: `## REQ-004 标题` 起, 到下个 `## ` 为止; 块内 `- 键: 值` 进 fields
+    (键: 优先级/动机/期望/验收/威胁/范围)."""
+    text = read_any_text(path)
+    reqs = {}
+    cur = None
+    for line in text.splitlines():
+        m = REQ_HEAD_RE.match(line)
+        if m:
+            reqs[m.group(1)] = {"title": m.group(2).strip(), "fields": {}}
+            cur = m.group(1)
+            continue
+        if cur:
+            m = re.match(r"^\s*-\s*([^:：]+)[:：]\s*(.+)$", line)
+            if m:
+                reqs[cur]["fields"][m.group(1).strip()] = m.group(2).strip()
+    return reqs
+
+
+def _find_req_on_board(root: Path, req_id: str):
+    """在全部看板卡里搜 req_id 引用, 返回 (state, task_id) 或 None."""
+    for state, entry in iter_entries(root):
+        if req_id in read_card(entry):
+            return state, entry_id(entry)
+    return None
+
+
+def cmd_req_status(args) -> int:
+    """kanban req-status [需求文档] — 核对需求文档条目与看板卡的对应状态."""
+    doc = Path(args[0]) if args else Path.cwd() / "docs" / "requirements.md"
+    if not doc.is_file():
+        raise KanbanError(f"需求文档不存在: {doc} (可用 kanban req-status <路径>)")
+    reqs = _parse_reqs(doc)
+    if not reqs:
+        print(f"{doc}: 未找到 REQ 条目 (格式: ## REQ-004 标题 + - 键: 值)")
+        return 0
+    root = board_root()
+    print(f"需求文档: {doc}")
+    for rid, info in reqs.items():
+        hit = _find_req_on_board(root, rid)
+        if hit:
+            state, tid = hit
+            print(f"  {rid} {info['title']}  → 看板 {tid} [{state}]")
+        else:
+            print(f"  {rid} {info['title']}  → 未建卡")
+    return 0
+
+
 def cmd_new(args) -> int:
     large = "--large" in args
     gid = None
     deps = []
     review = "standard"  # 审核等级: light | standard | full (默认标准)
+    spec_file = None
+    req_id = None
     rest = []
     i = 0
     while i < len(args):
@@ -488,6 +543,16 @@ def cmd_new(args) -> int:
             review = args[i]
             if review not in ("light", "standard", "full"):
                 raise KanbanError("--review 只能是 light|standard|full (轻量|标准|完整)")
+        elif a == "--spec-file":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--spec-file 需要 <需求文档路径>")
+            spec_file = Path(args[i])
+        elif a == "--req":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--req 需要 <REQ-ID>")
+            req_id = args[i]
         elif a == "--large":
             pass  # 已由 large = "--large" in args 处理
         elif a.startswith("--"):
@@ -515,6 +580,41 @@ def cmd_new(args) -> int:
         if entry_id(entry) == task_id:
             raise KanbanError(f"任务 ID 已存在: {task_id}")
     text = template_card(title, kind)
+    if spec_file:
+        if not spec_file.is_file():
+            raise KanbanError(f"需求文档不存在: {spec_file}")
+        reqs = _parse_reqs(spec_file)
+        if not req_id:
+            avail = ", ".join(reqs) if reqs else "(文档无 REQ 条目)"
+            raise KanbanError(f"--spec-file 需要配合 --req 指定条目; 可用: {avail}")
+        if req_id not in reqs:
+            raise KanbanError(f"文档 {spec_file} 没有 {req_id}")
+        dup = _find_req_on_board(root, req_id)
+        if dup:
+            state, tid = dup
+            if state == "done":
+                raise KanbanError(
+                    f"{req_id} 已实现并 done ({tid}); 请勿重复建卡。"
+                    f"若确需重做, 先在需求文档更新后换新编号。"
+                )
+            raise KanbanError(f"{req_id} 已有进行中卡 ({tid} @ {state}); 如需重开请先处理该卡")
+        f = reqs[req_id]["fields"]
+        goal = f.get("期望") or f.get("动机") or f.get("目标") or "<填写>"
+        accept = f.get("验收") or "<填写>"
+        threat = f.get("威胁") or "N/A"
+        scope = f.get("范围") or f"- 详见需求文档 {req_id}"
+        text = text.replace("<填写>\n\n## 用户决策", f"{goal}\n\n## 用户决策")
+        text = text.replace("## 用户决策\n\nN/A", "## 用户决策\n\n按需求文档执行 (需求来源见 讨论与决策)。")
+        if accept != "<填写>":
+            checks = "\n".join(f"- [ ] {a.strip()}" for a in accept.splitlines() if a.strip())
+            text = text.replace("- [ ] <填写>", checks)
+        text = text.replace("## 威胁模型\n\nN/A", f"## 威胁模型\n\n{threat}")
+        text = text.replace("- <填写>\n\n## 讨论与决策", f"{scope}\n\n## 讨论与决策")
+        text = text.replace(
+            "## 讨论与决策\n",
+            f"## 讨论与决策\n\n需求来源: {req_id} {reqs[req_id]['title']} ({spec_file})\n", 1,
+        )
+        print(f"已从需求文档导入: {req_id} {reqs[req_id]['title']}")
     review_label = {"light": "轻量", "standard": "标准", "full": "完整"}[review]
     text = text.replace("- 审核: 标准", f"- 审核: {review_label}", 1)
     if gid:
@@ -1283,6 +1383,8 @@ def main(argv) -> int:
             return cmd_show(args)
         if cmd == "new":
             return cmd_new(args)
+        if cmd == "req-status":
+            return cmd_req_status(args)
         if cmd == "upgrade":
             return cmd_upgrade(args)
         if cmd == "pick":
