@@ -25,7 +25,7 @@
 │ (工作流契约,  │ │ (Python 零   │ │ + worktree 防篡改          │
 │  按需加载)     │ │  依赖)       │ │ (子代理只读审核的门禁)      │
 └───────────────┘ └──────────────┘ └───────────────────────────┘
-        │  ~/.dsh/AGENTS.md (常驻指针: 任务管理走 onevoke 技能)
+        │  (按项目 opt-in: 项目根 AGENTS.md 声明走看板流程, 不写全局)  
         ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │ 任务执行 = 独立 DSH 会话  kb-<task-id>                            │
@@ -43,7 +43,7 @@
 | `skills/onevoke/SKILL.md` | **流程契约**:看板/多会话/worktree/审核/报告 | DSH 技能按需加载,不常驻占上下文;格式与 `~/.agents/skills/` 一致 |
 | `bin/kanban` | 机械状态机:new/pick/start/move/check | 文件即状态,CLI 保证不变量(Onevoke 同哲学) |
 | `bin/onevoke-review` | 审核证据 + Git 门禁 + 防篡改 | 审核的机械部分;角色判断交给 DSH subagent |
-| `~/.dsh/AGENTS.md` | 常驻一行指针 | DSH agent-instructions 自动加载用户全局 AGENTS.md |
+| `项目 AGENTS.md` | 按项目 opt-in 入口(可选) | 用 dsh-onevoke 的项目自己声明;不写全局,不污染其他项目 |
 
 **DSH 原生能力映射**(Onevoke 里要靠 CLI/进程实现的,这里直接用 DSH 的):
 
@@ -53,7 +53,7 @@
 | 审核 wrapper 调 codex/grok CLI | **subagent 工具**(每角色一个全新上下文的子代理) |
 | 协调 Agent 巡检任务组 | 并行任务 = 多个会话;同一会话内长任务用 goal |
 | welcome/doctor/config 向导 | profile 配置(`cordis.patch.yml` / `~/.dsh/cordis.patch.yml`) |
-| ~/.agents 规则文件 | 技能 + ~/.dsh/AGENTS.md(agent-instructions 原生加载) |
+| ~/.agents 规则文件 | 技能 + 项目 AGENTS.md(可选 opt-in 入口) |
 
 ---
 
@@ -145,7 +145,7 @@ backlog ──→ todo ──→ working ──→ done ──→ archived
 | # | 维度 | Onevoke | dsh-onevoke |
 |---|---|---|---|
 | 1 | **形态与依赖** | 独立工具集(`bin/onevoke`+`bin/kanban`+install.sh 装 `~/.local/bin`+`~/.agents`),是"一个产品" | **DSH profile bundle 插件**,零 Onevoke 依赖,装进 profile 的 bundle 层 |
-| 2 | **规则载体** | `rules/*.md` 装到 `~/.agents/`(AGENTS.md 入口,常驻上下文) | **DSH 技能** `SKILL.md`(**按需加载**,不常驻)+ `~/.dsh/AGENTS.md` 一行指针 |
+| 2 | **规则载体** | `rules/*.md` 装到 `~/.agents/`(AGENTS.md 入口,常驻上下文) | **DSH 技能** `SKILL.md`(**按需加载**)+ 项目 `AGENTS.md`(可选,按项目 opt-in,不写全局) |
 | 3 | **会话模型** | 每任务 = tmux window + **新 CLI 进程**(codex/claude/grok),会话能否恢复取决于各家 CLI | 每任务 = tmux window 跑 **DSH 会话,id 稳定为 `kb-<task-id>`**(start 按官方 JSONL+zstd 格式预建会话,`--resume=kb-<task-id>` 启动/恢复) |
 | 4 | **Agent 抽象** | Agent = PATH 上的 CLI 二进制,每家要配 YOLO 旗标/effort 映射/规则接入点/审核 wrapper(注册表 7 家) | **只有一个 dsh**;模型/推理强度由 profile 配置(一处搞定,无 per-agent 适配) |
 | 5 | **审核执行** | 审核 wrapper 调 codex/grok CLI(`--sandbox read-only --ephemeral` / `--no-subagents`),产出角色报告文件 | **subagent 工具**发起只读审核(每角色一个全新上下文的子代理);`onevoke-review` 只做证据收集 + Git 门禁 + 防篡改 |

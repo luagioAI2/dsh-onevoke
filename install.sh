@@ -33,17 +33,9 @@ install -m 0644 "$HERE/bin/create-session.mjs" "$DSH_HOME/bin/create-session.mjs
 echo "CLI 已安装: $BIN_DIR/kanban, $BIN_DIR/onevoke-review, $BIN_DIR/onevoke-group"
 echo "CLI 已安装(DSH home): $DSH_HOME/bin/kanban, $DSH_HOME/bin/onevoke-review, $DSH_HOME/bin/onevoke-group"
 
-# 3. 用户级全局规则指针 (仅当不存在, 不覆盖用户已有 AGENTS.md)
-AGENTS="$DSH_HOME/AGENTS.md"
-if [[ ! -f "$AGENTS" ]]; then
-  cat > "$AGENTS" <<'EOF'
-# 任务与需求管理遵循 Onevoke 工作流: 先加载 onevoke 技能再执行
-# (看板文件状态机 / 每任务独立会话 / git worktree 提交 / PM+QA 审核门禁)。
-EOF
-  echo "已创建规则指针: $AGENTS"
-else
-  echo "已存在 $AGENTS, 未覆盖 (如需接入 onevoke 规则请手动添加)"
-fi
+# 3. 不再创建全局 ~/.dsh/AGENTS.md 指针 — dsh-onevoke 按项目 opt-in:
+#    使用本插件的项目在仓库根放 AGENTS.md (进 git, 团队共享) 声明即可,
+#    不污染其他不使用本插件的项目。
 
 # 4. per-role reviewer 默认配置 (仅当不存在)
 REVIEWERS_DIR="$DSH_HOME/onevoke"

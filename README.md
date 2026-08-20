@@ -1,4 +1,4 @@
-﻿# dsh-onevoke
+# dsh-onevoke
 
 把 [Onevoke](https://github.com/dualface/onevoke) 的**思想**(文件看板流程、每任务独立会话、
 git worktree 提交、多角色审核门禁)原样搬到 **DeepSeek Harness (DSH)** 里,做成一个
@@ -27,7 +27,7 @@ dsh --profile tui
 | `bin/onevoke-group` | 任务组编排脚本: 按依赖自动启动就绪卡, 轮询到整组完成 (`--plan`/`--dry-run`) |
 | `bin/onevoke-review` | 审核证据 + Git 门禁 + worktree 防篡改 + per-role reviewer 配置解析 |
 | `bin/create-session.mjs` | 按官方格式预建 DSH 会话 → 任务会话 id 稳定为 `kb-<task-id>` |
-| `install.sh` | 技能 → `~/.dsh/skills/`,CLI → `~/.local/bin` + `~/.dsh/bin`,规则指针 → `~/.dsh/AGENTS.md`,审核角色配置 → `~/.dsh/onevoke/reviewers.yml` |
+| `install.sh` | 技能 → `~/.dsh/skills/`,CLI → `~/.local/bin` + `~/.dsh/bin`,审核角色配置 → `~/.dsh/onevoke/reviewers.yml`(不写全局 AGENTS.md,按项目 opt-in) |
 
 ## 安装
 
@@ -112,7 +112,7 @@ reviewers:                # 审核按角色 (高于 review)
 | `kanban` CLI + 文件看板 | 自带 `bin/kanban`(同命令,同状态机,零依赖) |
 | 每任务一个 tmux window / CLI 进程 | 每任务一个 tmux window 跑 **全新 DSH 会话** |
 | 审核 wrapper 调 codex/grok CLI | `onevoke-review` 收集证据 + **subagent** 只读审核(per-role 模型) |
-| `rules/*.md` 装到 `~/.agents/` | 工作流契约 = **技能** `onevoke`(按需加载)+ `~/.dsh/AGENTS.md` 指针 |
+| `rules/*.md` 装到 `~/.agents/` | 工作流契约 = **技能** `onevoke`(按需加载)+ 项目 `AGENTS.md`(可选,opt-in 入口) |
 | welcome/doctor/config | 不需要(模型/会话由 DSH profile 管) |
 
 ## 在 QuickTUI 里看
