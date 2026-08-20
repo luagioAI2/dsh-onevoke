@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 from pathlib import Path
 
 STATES = ("backlog", "todo", "working", "done", "archived", "trash")
@@ -882,7 +883,8 @@ def cmd_group(args) -> int:
 
 
 def cmd_web(args) -> int:
-    """kanban web [--port <n>] [--bind <ip>] — 看板状态服务 (HTML 页面 + JSON API)."""
+    """kanban web [--port <n>] [--bind <ip>] — 看板状态服务:
+    状态列 / 归档切换 / 关键词搜索 / 点卡看全文 / SSE 实时刷新."""
     port, bind = 8090, "0.0.0.0"
     i = 0
     while i < len(args):
@@ -916,7 +918,6 @@ def cmd_web(args) -> int:
                     gid, deps = group_fields(text)
                     m = re.search(r"^- 类型:\s*(.+)$", text, re.M)
                     t = m.group(1).strip() if m else ""
-                    # done/archived 显示完成时间, 否则显示开始时间
                     m = re.search(r"^- 完成时间:\s*(.+)$", text, re.M)
                     if not m:
                         m = re.search(r"^- 开始时间:\s*(.+)$", text, re.M)
@@ -933,8 +934,85 @@ def cmd_web(args) -> int:
             states[state] = rows
         return {"board": root.as_posix(), "states": states}
 
+    def task_json(tid: str):
+        root = board_root()
+        _, entry = find_card(root, tid)
+        text = read_any_text(spec_path(entry))
+        return {"id": tid, "title": card_title(text), "text": text}
+
+    board_page = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>看板 · __BOARD_PATH__</title>
+<style>
+body{background:#121212;color:#e8e8e8;font:14px/1.5 system-ui;margin:0;padding:16px}
+h1{font-size:18px;margin:0 0 4px} .bar{display:flex;gap:10px;align-items:center;margin:8px 0 14px;flex-wrap:wrap}
+input#kw{background:#1c1c1c;border:1px solid #333;color:#e8e8e8;border-radius:6px;padding:6px 10px;flex:1;min-width:160px}
+button{background:#1c1c1c;border:1px solid #444;color:#e8e8e8;border-radius:6px;padding:6px 12px;cursor:pointer}
+button.on{border-color:#7ee787;color:#7ee787} #status{color:#666;font-size:12px}
+.cols{display:flex;gap:12px;flex-wrap:wrap}
+.col{flex:1 1 250px;background:#1c1c1c;border-radius:10px;padding:12px}
+h2{font-size:14px;margin:0 0 8px;font-weight:600} h2 .n{color:#888;font-weight:400}
+.col.todo h2{color:#9adcff} .col.working h2{color:#ffd27e} .col.done h2{color:#7ee787}
+.col.archived h2,.col.trash h2{color:#888} .col.backlog h2{color:#bbb}
+.card{background:#242424;border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer}
+.card:hover{background:#2c2c2c} .cid{font-size:11px;color:#7ee787}
+.ct{font-weight:600} .cm{color:#aaa;font-size:12px}
+.empty{color:#555} a{color:#9adcff}
+#dlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10}
+#dlg-box{position:absolute;left:50%;top:8%;transform:translateX(-50%);width:min(720px,92vw);max-height:82vh;overflow:auto;background:#1c1c1c;border-radius:12px;padding:16px 20px;box-shadow:0 8px 30px #000}
+#dlg .x{float:right;background:none;border:none;color:#aaa;font-size:18px;cursor:pointer}
+#dlg h3{margin:0 0 2px} #dlg .did{color:#7ee787;font-size:12px;margin-bottom:10px}
+#dlg-body{white-space:pre-wrap;word-break:break-word;color:#ddd}
+#dlg-body h3,#dlg-body h4{margin:14px 0 6px;color:#9adcff}
+#dlg-body .li{margin:2px 0} #dlg-body .li.done{color:#7ee787}
+</style></head><body>
+<h1>看板 · __BOARD_PATH__</h1>
+<div class="bar">
+  <input id="kw" placeholder="搜索 ID/标题/类型…">
+  <button id="toggle">归档</button>
+  <span id="status">连接中…</span>
+</div>
+<div class="cols" id="board"></div>
+<div id="dlg"><div id="dlg-box"><button class="x" onclick="closeDlg()">✕</button>
+<h3 id="dlg-title"></h3><div class="did" id="dlg-id"></div><div id="dlg-body"></div></div></div>
+<script>
+"use strict";
+const ACTIVE=["backlog","todo","working","done"], ALL=ACTIVE.concat(["archived","trash"]);
+let showArchived=false, tasks=null;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function load(){try{const r=await fetch("/api/board");tasks=await r.json();document.getElementById("status").textContent="更新 "+new Date().toLocaleTimeString();render();}catch(e){document.getElementById("status").textContent="连接失败";}}
+function meta(c){const p=[];if(c.type)p.push("["+esc(c.type)+"]");if(c.time)p.push(esc(c.time));const m=[];if(c.review)m.push("审 "+esc(c.review));if(c.large)m.push("large");if(c.group)m.push("组 "+esc(c.group));if(c.session)m.push("会话 "+esc(c.session));if(m.length)p.push(m.join(" "));return p.join(" ");}
+function render(){const kw=document.getElementById("kw").value.trim().toLowerCase();
+const states=showArchived?ALL:ACTIVE;
+document.getElementById("board").innerHTML=states.map(s=>{const rows=(tasks.states[s]||[]).filter(c=>!kw||(c.id+" "+c.title+" "+c.type).toLowerCase().includes(kw));
+const cards=rows.map(c=>'<div class="card" data-id="'+esc(c.id)+'"><div class="cid">'+esc(c.id)+'</div><div class="ct">'+esc(c.title)+'</div>'+(meta(c)?'<div class="cm">'+meta(c)+'</div>':"")+'</div>').join("");
+return '<section class="col '+s+'"><h2>'+s+' <span class="n">'+rows.length+'</span></h2>'+(cards||'<p class="empty">空</p>')+'</section>';}).join("");
+document.querySelectorAll(".card").forEach(el=>el.onclick=()=>openTask(el.dataset.id));}
+async function openTask(id){try{const r=await fetch("/api/tasks/"+encodeURIComponent(id));const t=await r.json();
+document.getElementById("dlg-title").textContent=t.title;document.getElementById("dlg-id").textContent=id;
+document.getElementById("dlg-body").innerHTML=md(t.text);document.getElementById("dlg").style.display="block";}catch(e){}}
+function closeDlg(){document.getElementById("dlg").style.display="none";}
+function md(s){return esc(s).split(/\\n/).map(line=>{
+if(/^##\\s/.test(line))return '<h4>'+line.slice(3)+'</h4>';
+if(/^#\\s/.test(line))return '<h3>'+line.slice(2)+'</h3>';
+if(/^- \\[x\\]\\s/i.test(line))return '<div class="li done">☑ '+line.slice(6)+'</div>';
+if(/^- \\[ \\]\\s/.test(line))return '<div class="li">☐ '+line.slice(6)+'</div>';
+if(/^-\\s/.test(line))return '<div class="li">• '+line.slice(2)+'</div>';
+return line===""?"":'<div>'+line+'</div>';}).join("");}
+function sse(){const es=new EventSource("/api/events");es.addEventListener("board",()=>load());es.onerror=()=>{es.close();setTimeout(sse,5000);};}
+document.getElementById("toggle").onclick=()=>{showArchived=!showArchived;document.getElementById("toggle").classList.toggle("on",showArchived);render();};
+document.getElementById("kw").oninput=render;
+document.getElementById("dlg").onclick=e=>{if(e.target.id==="dlg")closeDlg();};
+load();sse();setInterval(load,30000);
+</script></body></html>"""
+
+    sse_last = {"fp": None}
+
+    def fingerprint() -> str:
+        return json.dumps(board_json(), ensure_ascii=False, sort_keys=True)
+
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, fmt, *a):  # 安静
+        def log_message(self, fmt, *a):
             pass
 
         def _send(self, code, body, ctype):
@@ -949,78 +1027,48 @@ def cmd_web(args) -> int:
             if path == "/api/board":
                 data = json.dumps(board_json(), ensure_ascii=False).encode("utf-8")
                 return self._send(200, data, "application/json; charset=utf-8")
-            if path.startswith("/api/card/"):
-                tid = path[len("/api/card/"):]
-                root = board_root()
+            if path.startswith("/api/tasks/"):
+                tid = unquote(path[len("/api/tasks/"):])
                 try:
-                    _, entry = find_card(root, tid)
-                    body = read_any_text(spec_path(entry))
+                    data = json.dumps(task_json(tid), ensure_ascii=False).encode("utf-8")
                 except KanbanError:
                     return self._send(404, b'{"error":"not found"}', "application/json")
+                return self._send(200, data, "application/json; charset=utf-8")
+            if path.startswith("/api/card/"):
+                tid = unquote(path[len("/api/card/"):])
+                try:
+                    body = read_any_text(spec_path(find_card(board_root(), tid)[1]))
+                except KanbanError:
+                    return self._send(404, b"not found", "text/plain")
                 return self._send(200, body.encode("utf-8"), "text/plain; charset=utf-8")
+            if path == "/api/events":
+                return self._stream_events()
             if path == "/":
-                page = render_board_html(board_json())
+                page = board_page.replace("__BOARD_PATH__", html.escape(board_root().as_posix()))
                 return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
             self._send(404, b"not found", "text/plain")
 
-    def render_board_html(data) -> str:
-        def esc(s):
-            return html.escape(str(s))
-
-        cols = []
-        for state in STATES:
-            rows = data["states"][state]
-            cards = ""
-            for r in rows:
-                marks = []
-                if r["large"]:
-                    marks.append("large")
-                if r["review"]:
-                    marks.append(f"审 {esc(r['review'])}")
-                if r["group"]:
-                    marks.append(f"组 {esc(r['group'])}")
-                if r["session"]:
-                    marks.append(f"会话 {esc(r['session'])}")
-                parts = []
-                if r["type"]:
-                    parts.append(f"[{esc(r['type'])}]")
-                if r["time"]:
-                    parts.append(esc(r["time"]))
-                if marks:
-                    parts.append(" ".join(marks))
-                if r["deps"]:
-                    parts.append(f"前置: {esc(', '.join(r['deps']))}")
-                cm = " ".join(parts)
-                cards += (
-                    f'<div class="card"><div class="cid">{esc(r["id"])}</div>'
-                    f'<div class="ct">{esc(r["title"])}</div>'
-                    + (f'<div class="cm">{cm}</div>' if cm else "")
-                    + "</div>"
-                )
-            cols.append(
-                f'<section class="col {state}"><h2>{state} <span class="n">{len(rows)}</span></h2>{cards or "<p class=empty>空</p>"}</section>'
-            )
-        return f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>看板 · {esc(data['board'])}</title>
-<style>
-body{{background:#121212;color:#e8e8e8;font:14px/1.5 system-ui;margin:0;padding:16px}}
-h1{{font-size:18px}} .cols{{display:flex;gap:12px;flex-wrap:wrap}}
-.col{{flex:1 1 250px;background:#1c1c1c;border-radius:10px;padding:12px}}
-h2{{font-size:14px;margin:0 0 8px}} .n{{color:#888;font-weight:400}}
-.col.todo h2{{color:#9adcff}} .col.working h2{{color:#ffd27e}}
-.col.done h2{{color:#7ee787}} .col.archived h2,.col.trash h2{{color:#888}}
-.col.backlog h2{{color:#bbb}}
-.card{{background:#242424;border-radius:8px;padding:8px 10px;margin:6px 0}}
-.cid{{font-size:11px;color:#7ee787}} .ct{{font-weight:600}}
-.cm{{color:#aaa;font-size:12px}}
-.empty{{color:#555}} a{{color:#9adcff}}
-</style></head><body>
-<h1>看板 · {esc(data['board'])}</h1>
-<div class="cols">{''.join(cols)}</div>
-<p style="color:#666">每 10 秒自动刷新 · <a href="/api/board">JSON</a></p>
-<script>setTimeout(()=>location.reload(),10000)</script>
-</body></html>"""
+        def _stream_events(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            try:
+                counter = 0
+                while True:
+                    fp = fingerprint()
+                    if fp != sse_last["fp"]:
+                        sse_last["fp"] = fp
+                        self.wfile.write(("event: board\ndata: " + fp + "\n\n").encode("utf-8"))
+                        self.wfile.flush()
+                    counter += 1
+                    if counter % 5 == 0:
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+                    time.sleep(3)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
 
     print(f"看板状态服务: http://{bind}:{port}  (Ctrl+C 停止)")
     try:
@@ -1028,6 +1076,7 @@ h2{{font-size:14px;margin:0 0 8px}} .n{{color:#888;font-weight:400}}
     except KeyboardInterrupt:
         pass
     return 0
+
 
 
 def validate_groups(root: Path) -> list:
