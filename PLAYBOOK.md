@@ -115,11 +115,12 @@ kanban design init        # 幂等: 生成 program/ art/ numeric/ + specs/ 规�
 
 | 目录 | 类型 | 编号 | 规范 | 谁写 |
 |---|---|---|---|---|
-| `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md` | 主会话 Agent(引导提问) |
+| `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md`(含**技术架构**: 选型/模块/边界/数据流) | 主会话 Agent(引导提问); 架构切 plan 模型(强思考), 可 subagent 复核 |
 | `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) | 主会话 Agent |
 | `requirements/numeric/` | 数值需求 | REQ-N-NNN | `specs/numeric.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
 | `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | — | Agent |
-| `docs/architecture.md` | 技术方案: 选型/模块/边界/数据流 | — | 主会话切 plan 模型(强思考); 可 subagent 复核 |
+
+> 技术架构**直接维护在 `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设 `docs/architecture.md`);项目已有独立技术文档时用其位置并在 specs 里注明引用。
 
 **建需求文件**(每需求一个文件,编号自动递增,状态默认「待评审」):
 

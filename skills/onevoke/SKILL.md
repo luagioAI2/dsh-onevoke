@@ -147,8 +147,9 @@ requirements/
   # art/numeric 同理; 单文档旧式格式 (docs/requirements.md, ## REQ-004) 仍兼容
   ```
   文件头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
-  (技术约束|产出规范|数值规范)/不在本轮范围。选型/架构结论写 `docs/architecture.md` 与
-  `docs/decisions.md`(ADR: 为什么这么选/备选/影响);稳定结论顺手进 `kanban/MEMORY.md`。
+  (技术约束|产出规范|数值规范)/不在本轮范围。**技术架构(选型/模块/边界/数据流)直接维护在
+  `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设 docs/architecture.md);
+  决策取舍写 `docs/decisions.md`(ADR: 为什么这么选/备选/影响);稳定结论顺手进 `kanban/MEMORY.md`。
 - **评审拍板**: 需求文件头部 `- 状态:` 由「待评审」改「已拍板」(评审通过后)。
 - **团队取需求转看板**(design → kanban 衔接点;该 REQ 已在看板任意状态则拒绝,防重复):
   ```bash
@@ -189,7 +190,7 @@ requirements/
   ```
   模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。
 - **启动者不再巡检该卡**(除非用户要求跟踪);执行 Agent 在独立会话直接向用户汇报。任务并行 = 多个这样的会话并行。
-- 执行 Agent 开工:先 `skill` 加载 onevoke 技能 → `kanban show <id>` 读卡 → 读 `kanban/RULES.md`(项目规则)与 `kanban/MEMORY.md`(跨任务记忆,若存在)→ 读 `docs/architecture.md`(技术方案,若存在;实现应遵循其设计,有出入先说明再偏离)→ 读项目 `AGENTS.md`/规则。
+- 执行 Agent 开工:先 `skill` 加载 onevoke 技能 → `kanban show <id>` 读卡 → 读 `kanban/RULES.md`(项目规则)与 `kanban/MEMORY.md`(跨任务记忆,若存在)→ 读 `requirements/specs/program.md`「技术架构」章节(若存在;实现应遵循其设计,有出入先说明再偏离)→ 读项目 `AGENTS.md`/规则。
 
 ## Git worktree 流程
 

@@ -440,7 +440,7 @@ REQ_TEMPLATE_PROGRAM = """# REQ-P-{num:03d} {title}
 
 ## 技术约束
 
-- 架构: <引用 requirements/specs/program.md 或 docs/architecture.md 相关章节>
+- 架构: <引用 requirements/specs/program.md「技术架构」章节 (选型/模块/边界/数据流)>
 - 接口契约: <请求/响应/错误码; 无接口则 N/A>
 - 技术栈/依赖限制: <按 specs/program.md 约定>
 
@@ -509,11 +509,17 @@ REQ_SPEC_PROGRAM = """# 程序需求规范 (requirements/specs/program.md)
 - 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;
 - 必含章节: 需求描述 / 验收标准 / 技术约束 / 不在本轮范围。
 
-## 技术架构文档
+## 技术架构(本文件即程序团队的技术架构文档)
 
-- 架构决策集中维护在 docs/architecture.md (或本文件后续章节);
-- 需求里的「技术约束-架构」引用架构文档章节, 不重复全文;
-- 架构变更必须先改架构文档再转看板, 禁止边做边定架构。
+架构不另设 docs/architecture.md,直接维护在本文件「技术架构」章节,程序团队的需求与架构一体:
+
+- **选型**: 技术栈/语言/框架/数据库/中间件, 及选型理由与备选;
+- **模块**: 模块划分/职责/依赖方向 (谁依赖谁, 禁止反向);
+- **边界**: 模块间接口契约、数据流、状态机、异常边界;
+- **数据流**: 关键链路 (请求→处理→存储→响应) 与数据模型。
+- 需求里的「技术约束-架构」引用本文件章节, 不重复全文;
+- 架构变更必须先改本文件再转看板, 禁止边做边定架构;
+- 项目已有独立技术文档 (如团队 wiki/仓库 docs/ 自管) 时, 用其位置并在本文件注明引用。
 
 ## 工程约定 (按项目实际情况维护)
 
@@ -1438,14 +1444,14 @@ def task_prompt(task_id: str, title: str, entry: Path) -> str:
     project = board.parent
     rules = board / "RULES.md"
     mem = board / "MEMORY.md"
-    arch = project / "docs" / "architecture.md"
+    arch = project / "requirements" / "specs" / "program.md"
     notes = []
     if rules.exists():
         notes.append(f" 若 {rules} 存在, 先读它(项目看板规则, 优先级高于通用技能)。")
     if mem.exists():
         notes.append(f" 若 {mem} 存在, 先读它(跨任务记忆, 参考以往经验与决策)。")
     if arch.exists():
-        notes.append(f" 若 {arch} 存在, 先读它(技术方案, 实现应遵循其设计; 有出入先说明再偏离)。")
+        notes.append(f" 若 {arch} 存在, 先读它「技术架构」章节 (选型/模块/边界/数据流; 实现应遵循其设计, 有出入先说明再偏离)。")
     return (
         f"看板任务 {task_id} - {title}。"
         f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
