@@ -94,6 +94,7 @@ CONTEXT_TEXT="${REVIEW_CONTEXT:-None provided.}"
 #               (4) 会话默认模型 (subagent 不支持覆盖时忽略)
 REVIEWER_PROVIDER="${ONEVOKE_REVIEWER_PROVIDER:-}"
 REVIEWER_MODEL="${ONEVOKE_REVIEWER_MODEL:-}"
+REVIEWER_EFFORT="${ONEVOKE_REVIEWER_EFFORT:-}"
 REVIEWERS_FILE="${ONEVOKE_REVIEWERS:-${DSH_HOME:-$HOME/.dsh}/onevoke/reviewers.yml}"
 # 项目配置固定在看板目录内: kanban/.dsh-onevoke.yml (跟随看板, 本地)
 PROJECT_CONFIG=""
@@ -138,29 +139,31 @@ def parse(path):
             out.setdefault(section, {})[key] = val
     return out
 
-def emit(provider, model):
+def emit(provider, model, effort=None):
     if provider:
         print(f"provider={provider}")
     if model:
         print(f"model={model}")
+    if effort:
+        print(f"effort={effort}")
 
 project_cfg = parse(project) if project else {}
 home_cfg = parse(home) if home else {}
 role_cfg = project_cfg.get("reviewers", {}).get(role)
 if role_cfg:
-    emit(role_cfg.get("provider"), role_cfg.get("model"))
+    emit(role_cfg.get("provider"), role_cfg.get("model"), role_cfg.get("reasoningEffort"))
     sys.exit(0)
 gen = project_cfg.get("review")
 if gen and (gen.get("provider") or gen.get("model")):
-    emit(gen.get("provider"), gen.get("model"))
+    emit(gen.get("provider"), gen.get("model"), gen.get("reasoningEffort"))
     sys.exit(0)
 role_cfg = home_cfg.get("reviewers", {}).get(role)
 if role_cfg:
-    emit(role_cfg.get("provider"), role_cfg.get("model"))
+    emit(role_cfg.get("provider"), role_cfg.get("model"), role_cfg.get("reasoningEffort"))
     sys.exit(0)
 gen = home_cfg.get("review")
 if gen:
-    emit(gen.get("provider"), gen.get("model"))'
+    emit(gen.get("provider"), gen.get("model"), gen.get("reasoningEffort"))'
 PY=""
 # 逐个候选验证能真正执行 (Windows Store 的 python3 stub 静默无输出, 不能算数)
 for cand in python3 python; do
@@ -183,6 +186,7 @@ if [[ -n "$PY" ]]; then
     val=$(printf '%s' "$val" | tr -d '\r\n')  # 剥离 Windows python 管道可能带上的换行
     if [[ "$key" == "provider" && -z "$REVIEWER_PROVIDER" ]]; then REVIEWER_PROVIDER="$val"; fi
     if [[ "$key" == "model" && -z "$REVIEWER_MODEL" ]]; then REVIEWER_MODEL="$val"; fi
+    if [[ "$key" == "effort" && -z "$REVIEWER_EFFORT" ]]; then REVIEWER_EFFORT="$val"; fi
   done < <("$PY" -c "$RESOLVE_REVIEWER_PY" "$ROLE" "$PROJECT_PATH" "$REVIEWERS_PATH")
 fi
 
@@ -204,7 +208,7 @@ worktree。审核期间不得留下任何改动。
 审核 base: $BASE_SHA
 审核 commit: $COMMIT_SHA
 审核上下文: $CONTEXT_TEXT
-审核执行模型: ${REVIEWER_PROVIDER:-<会话默认>}/${REVIEWER_MODEL:-<会话默认>} (把 provider/model 传给 subagent 作为覆盖; 工具不支持则忽略)
+审核执行模型: ${REVIEWER_PROVIDER:-<会话默认>}/${REVIEWER_MODEL:-<会话默认>}${REVIEWER_EFFORT:+ (推理级别 $REVIEWER_EFFORT)} (把 provider/model/推理级别传给 subagent 作为覆盖; 工具不支持则忽略)
 
 证据 (只读引用, 禁修改):
   commit 列表: $EVIDENCE_DIR/commits.txt

@@ -97,17 +97,25 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 model:                    # 执行模型: kanban start 自动 /model 切换
   provider: deepseek-official
   model: deepseek-v4-flash
+  reasoningEffort: max    # 可选推理级别 off|low|high|max (provider 支持时)
 plan:                     # 规划模型: 主会话建议 (手动 /model)
   provider: deepseek-official
   model: deepseek-reasoner
+  reasoningEffort: high
 review:                   # 审核通用模型
   provider: deepseek-official
   model: deepseek-v4-flash
+  reasoningEffort: max
 reviewers:                # 审核按角色覆盖 (高于 review)
   PM: { provider: pi-ai, model: deepseek-v4-pro }
 permission:               # 任务会话沙箱 (默认 danger-full-access)
   mode: workspace-write
 ```
+
+> **推理级别 (reasoningEffort)**: DSH 在 `/model` 弹窗里选中模型后可以单独调推理级别
+> (off/low/high/max,deepseek 适配器支持)。本配置把目标级别写进任务 prompt / 审核 prompt 指引
+> Agent 设置(弹窗行 id 不含 effort,文本注入无法直接设,需在弹窗中手动选一次);provider 层
+> 默认 `max`(tui 面)。
 
 - `kanban/RULES.md` — 项目级规则补充(任务 Agent 开工先读);`kanban/MEMORY.md` — 跨任务记忆。
 - 规则优先级: 当前任务用户指令 > 项目 AGENTS.md > `kanban/RULES.md` > persona(条件触发)> 技能默认。

@@ -371,15 +371,20 @@ def cmd_init(args) -> int:
 BOARD_CONFIG_TEMPLATE = """# 看板配置 (kanban/.dsh-onevoke.yml) — 本看板的模型/审核/权限设置
 # 优先级: 会话 /model > 本项目配置 > home (~/.dsh/onevoke/reviewers.yml) > 会话默认
 # 全部注释 = 用默认; 需要时取消注释并修改 (模型名需已注册的 provider 支持).
+# reasoningEffort: 可选推理级别 (off|low|high|max), 与 provider 是否支持有关;
+#   在 /model 弹窗选中模型后手动调同一值即可 (kanban start 会把本配置写进任务 prompt 指引).
 # model:                    # 执行模型 (kanban start 自动 /model 切换)
 #   provider: deepseek-official
 #   model: deepseek-v4-flash
+#   reasoningEffort: max
 # plan:                     # 规划模型 (主会话建议, 手动 /model)
 #   provider: deepseek-official
 #   model: deepseek-v4-flash
+#   reasoningEffort: high
 # review:                   # 审核通用模型
 #   provider: deepseek-official
 #   model: deepseek-v4-flash
+#   reasoningEffort: max
 # reviewers:                # 审核按角色 (高于 review)
 #   PM: { provider: pi-ai, model: deepseek-v4-pro }
 #   QA: { provider: deepseek-official, model: deepseek-v4-flash }
@@ -1741,7 +1746,12 @@ def cmd_start(args) -> int:
     pm = cfg.get("model")
     if pm and pm.get("provider") and pm.get("model"):
         pm_provider, pm_model = pm["provider"], pm["model"]
-        prompt += f" 本任务执行模型: {pm_provider}/{pm_model} (来自项目 .dsh-onevoke.yml)。"
+        pm_effort = pm.get("reasoningEffort")
+        effort_note = f", 推理级别 {pm_effort}" if pm_effort else ""
+        prompt += f" 本任务执行模型: {pm_provider}/{pm_model}{effort_note} (来自项目 .dsh-onevoke.yml)。"
+        if pm_effort:
+            prompt += (f" 在 /model 弹窗选中该模型后, 把推理级别调到 {pm_effort} "
+                       f"(off|low|high|max; 若该模型不支持则保持默认)。")
     else:
         pm = None
     plan_cfg = cfg.get("plan")
@@ -1762,11 +1772,14 @@ def cmd_start(args) -> int:
         print(f"请在新终端启动任务会话:")
         print(f"  {launch_cmd}")
         if pm:
-            print(f"项目执行模型: 先执行 /model {pm_provider}/{pm_model} 再粘贴任务 prompt")
+            effort_hint = f" (推理级别 {pm.get('reasoningEffort')})" if pm.get("reasoningEffort") else ""
+            print(f"项目执行模型: 先执行 /model {pm_provider}/{pm_model}{effort_hint} 再粘贴任务 prompt")
         print("然后粘贴:")
         print(f"  {prompt}")
         if plan_cfg and plan_cfg.get("provider") and plan_cfg.get("model"):
-            print(f"规划模型: {plan_cfg['provider']}/{plan_cfg['model']} (下一个需求的分析/填卡阶段请在主会话用 /model 切换)")
+            plan_effort = plan_cfg.get("reasoningEffort")
+            effort_hint = f", 推理级别 {plan_effort}" if plan_effort else ""
+            print(f"规划模型: {plan_cfg['provider']}/{plan_cfg['model']}{effort_hint} (下一个需求的分析/填卡阶段请在主会话用 /model 切换)")
         if stable:
             print(f"会话 id 稳定: {session_id} (恢复: dsh --profile tui --resume={session_id})")
         else:
@@ -1825,7 +1838,9 @@ def cmd_start(args) -> int:
     subprocess.run(["tmux", "send-keys", "-t", target, "Enter"],
                    check=False, timeout=10)
     print(f"已在 tmux window [{win}] 启动任务会话, prompt 已注入"
-          + (f", 模型已切换 {pm_provider}/{pm_model}" if pm else ""))
+          + (f", 模型已切换 {pm_provider}/{pm_model}"
+             + (f" (推理级别 {pm.get('reasoningEffort')})" if pm.get("reasoningEffort") else "")
+             if pm else ""))
     print("QuickTUI 可直接 attach 查看。")
     if stable:
         print(f"会话 id 稳定: {session_id} (恢复: dsh --profile tui --resume={session_id})")

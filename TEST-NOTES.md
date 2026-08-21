@@ -101,6 +101,11 @@
 - 集成阶段新增**合并核对清单**: 全量测试四数(文件/通过/跳过/失败)、载荷核对(rebase 后 diff 逐字节一致)、结果逐条对应验收条件;大任务 report 固定四段模板。
 - 坑: 卡片模板插入「红线」后,`cmd_new` 里 `- <填写>\n\n## 讨论与决策` 的旧替换失配,改为按「## 不在本轮范围」章节标题定位,实测旧格式/新格式导入均正常。
 
+### 5.11 推理级别 reasoningEffort 支持
+- 背景: `.dsh-onevoke.yml` 原只有 provider/model,没有推理级别。DSH 事实: `LlmCallConfig.reasoningEffort`(适配器定义的不透明字符串)、`agent-default-model` schema 支持 `reasoningEffort: z.string()`、`/model` 弹窗选中模型后可单独调 effort;deepseek 适配器合法值 `off|low|high|max`(tui 面 `llm-deepseek` 默认 `max`);弹窗行 id 为 `provider/model` 不含 effort,文本注入无法直接设。
+- 实现: `.dsh-onevoke.yml` 模板 model/plan/review 段加注释说明 `reasoningEffort`;kanban start 把配置写进任务 prompt(执行模型+推理级别+"/model 弹窗选中后调到 X"指引),`--no-window` 打印同样带;onevoke-review 解析并输出 `effort=`,prompt 带 `(推理级别 X)`,支持 `ONEVOKE_REVIEWER_EFFORT` 环境变量覆盖。
+- 实测: 配置 `reasoningEffort: max` 解析正确;start --no-window 输出 "本任务执行模型: deepseek-official/deepseek-v4-flash, 推理级别 max (来自项目 .dsh-onevoke.yml)。 在 /model 弹窗选中该模型后, 把推理级别调到 max";规划模型同样带。onevoke-review 的 effort 解析经 Python 段验证(worktree 门禁因 othersflow/ 未跟踪正常拦截,非代码问题)。
+
 ### 5.10 美术规范增强(othersflow 设计经验,通用化)
 - othersflow 设计资产: design-system.md(色彩令牌/字体/间距/图标系统/效果图流程)、banner 容器尺寸规范(真实组件量几何/比例区间+安全区/object-fit 裁切计算)、主题复刻规范(规则三段式: 规则/判定标准/反例;基准机;reduced-motion)、素材分层(品牌层 vs 主题层)、图集与 .json 边车一致性。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。

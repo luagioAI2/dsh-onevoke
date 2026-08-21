@@ -275,8 +275,8 @@ requirements/
 
 ## 审核执行模型(per-role reviewer)
 
-- 每个角色可配不同 provider/model。来源链(高到低): (1) 当前任务的用户指令; (2) 项目级 `AGENTS.md`/`CLAUDE.md`; (3) 用户自己的全局规则; (4) `~/.dsh/onevoke/reviewers.yml` 中该角色的取值; (5) 会话默认模型。
-- `onevoke-review` 的输出会带一行"审核执行模型",即来源链第 (4) 档解析结果(可用 `ONEVOKE_REVIEWER_PROVIDER`/`ONEVOKE_REVIEWER_MODEL` 环境变量覆盖)。
+- 每个角色可配不同 provider/model,并可加 `reasoningEffort`(推理级别 off|low|high|max,provider 支持时)。来源链(高到低): (1) 当前任务的用户指令; (2) 项目级 `AGENTS.md`/`CLAUDE.md`; (3) 用户自己的全局规则; (4) `~/.dsh/onevoke/reviewers.yml` 中该角色的取值; (5) 会话默认模型。
+- `onevoke-review` 的输出会带一行"审核执行模型",即来源链第 (4) 档解析结果(可用 `ONEVOKE_REVIEWER_PROVIDER`/`ONEVOKE_REVIEWER_MODEL`/`ONEVOKE_REVIEWER_EFFORT` 环境变量覆盖)。
 - 发起审核子代理时,若 `subagent` 工具支持 `provider`/`model` 参数则按该行传入作为覆盖;不支持则用会话默认模型,并在汇报里写明实际执行模型。
 - 同一角色一轮审核内不得中途换模型;换模型则该角色已有结论作废并重跑该阶段。
 
