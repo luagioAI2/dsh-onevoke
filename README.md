@@ -23,7 +23,7 @@ dsh --profile tui
 |---|---|
 | `cordis.patch.yml` | bundle patch: persona 加一行工作流指引 + 放大规则预算(64K→128K) |
 | `skills/onevoke/SKILL.md` | **工作流契约**(技能,按需加载): 看板模型/大任务/任务组/多会话/worktree/审核/完成报告 |
-| `bin/kanban` | 文件看板 CLI(Python 零依赖): design(需求仓库)/init/list/show/new(小/大/组)/pick/start/move/check/group/upgrade/**web** |
+| `bin/kanban` | 文件看板 CLI(Python 零依赖): design(需求仓库)/init/list/show/new(小/大/组)/pick/start/move/check/group/upgrade/e2e(L3)/visual(L4 基线diff)/**web** |
 | `bin/onevoke-group` | 任务组编排脚本: 按依赖自动启动就绪卡, 轮询到整组完成 (`--plan`/`--dry-run`) |
 | `bin/onevoke-review` | 审核证据 + Git 门禁 + worktree 防篡改 + per-role reviewer 配置解析 |
 | `bin/create-session.mjs` | 按官方格式预建 DSH 会话 → 任务会话 id 稳定为 `kb-<task-id>` |

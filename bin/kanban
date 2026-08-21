@@ -51,7 +51,8 @@ USAGE = """用法:
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档|需求仓库> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
   kanban req-status [需求文档|需求仓库] [--type t] [--module m]  核对需求条目与看板卡状态
-  kanban verify-ui <task-id>              L3 浏览器 E2E 验证 (独立阶段)
+  kanban e2e <task-id>                  L3 浏览器 E2E (独立阶段)
+  kanban visual <task-id>               L4 视觉回归 (基线截图 diff)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
   kanban start [--no-window] [--ignore-deps] [task-id]
                                            todo -> working 并拉起新 DSH 会话 (校验依赖)
@@ -555,7 +556,7 @@ REQ_SPEC_ART = """# 美术需求规范 (requirements/specs/art.md)
 ## 转看板
 
 - 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-A-NNN <feature|bug|chore|research> <slug> <标题>`
-- 美术产出验收 (L0-L2) 在任务卡内完成, 浏览器/实际效果截图用 kanban verify-ui。
+- 美术产出验收 (L0-L2) 在任务卡内完成, 浏览器 E2E 用 kanban e2e, 视觉回归用 kanban visual。
 """
 
 REQ_SPEC_NUMERIC = """# 数值需求规范 (requirements/specs/numeric.md)
@@ -1088,17 +1089,17 @@ def cmd_req_status(args) -> int:
     return 0
 
 
-def cmd_verify_ui(args) -> int:
-    """kanban verify-ui <task-id> — L3 浏览器 E2E 验证 (独立阶段, 任务完成后单独执行).
+def cmd_e2e(args) -> int:
+    """kanban e2e <task-id> — L3 浏览器 E2E (独立阶段, 任务完成后单独执行).
     不在任务卡验收条件内; 建截图目录 + 打印执行指引, 实际浏览器 E2E 由 Agent
     按技能执行 (起服务 → 走关键流程 → 截图 → 记录到卡片「实施与验证」)."""
     if not args:
-        raise KanbanError("kanban verify-ui 需要 <task-id>")
+        raise KanbanError("kanban e2e 需要 <task-id>")
     root = board_root()
     state, entry = find_card(root, args[0])
     shots = root.parent / "docs" / "screenshots" / args[0]
     shots.mkdir(parents=True, exist_ok=True)
-    print(f"L3 验证任务: {args[0]} [{state}]")
+    print(f"L3 浏览器 E2E: {args[0]} [{state}]")
     print(f"截图目录: {shots}")
     print("执行指引 (Agent 按 onevoke 技能「前端任务验证」执行):")
     print("  1. 启动应用 (如 go run ./cmd/server), 确认端口可访问")
@@ -1107,6 +1108,132 @@ def cmd_verify_ui(args) -> int:
     print("     优先用 DSH browser 工具: browser_screenshot <url> <截图路径>")
     print("  4. 在卡片「实施与验证」追加记录: 流程/截图路径/结论")
     return 0
+
+
+def cmd_visual(args) -> int:
+    """kanban visual <task-id> — L4 视觉回归 (基线截图 diff).
+    首次运行建 baseline/ 存基线截图; 之后截图放 current/, 与 baseline/ 同名文件对比.
+    diff 工具自动检测: ImageMagick compare → python3+PIL → 字节哈希兜底."""
+    if not args:
+        raise KanbanError("kanban visual 需要 <task-id>")
+    root = board_root()
+    state, entry = find_card(root, args[0])
+    vdir = root.parent / "docs" / "screenshots" / args[0] / "visual"
+    baseline = vdir / "baseline"
+    current = vdir / "current"
+    baseline.mkdir(parents=True, exist_ok=True)
+    current.mkdir(parents=True, exist_ok=True)
+    print(f"L4 视觉回归: {args[0]} [{state}]")
+    print(f"基线目录: {baseline}  (首次运行: 把通过验收的截图存这里, 命名 01-xxx.png 起)")
+    print(f"对比目录: {current}  (每次回归: 同命名截图放这里, 自动与基线 diff)")
+    base_files = sorted(baseline.glob("*.png"))
+    cur_files = sorted(current.glob("*.png"))
+    if not base_files:
+        print("基线为空: 先把通过验收的截图复制到 baseline/ (命名与 current 对应), 下次运行自动对比。")
+        return 0
+    if not cur_files:
+        print("对比为空: 用 browser 工具/Playwright 截图存 current/ (命名与 baseline 同名), 再跑本命令对比。")
+        return 0
+    tool = _detect_diff_tool()
+    if tool is None:
+        print("未检测到像素 diff 工具 (ImageMagick compare / python3+PIL), 用字节哈希对比 (仅判同/异, 无差异量):")
+        tool = "hash"
+    changed, total = 0, 0
+    for bf in base_files:
+        cf = current / bf.name
+        if not cf.is_file():
+            print(f"  {bf.name}: 基线有但 current 缺 (漏截图?)")
+            continue
+        total += 1
+        if tool == "compare":
+            r = _diff_imagemagick(bf, cf)
+            if r is None:
+                print(f"  {bf.name}: compare 失败, 请人工确认")
+            elif r == 0:
+                print(f"  {bf.name}: 一致 (无差异像素)")
+            else:
+                print(f"  {bf.name}: 有差异 ({r} 像素)")
+                changed += 1
+        elif tool == "pil":
+            r = _diff_pil(bf, cf)
+            if r is None:
+                print(f"  {bf.name}: PIL 对比失败 (尺寸不同或非 PNG), 请人工确认")
+            elif r == 0:
+                print(f"  {bf.name}: 一致 (无差异像素)")
+            else:
+                print(f"  {bf.name}: 有差异 ({r} 像素)")
+                changed += 1
+        else:
+            same = _diff_hash(bf, cf)
+            if same:
+                print(f"  {bf.name}: 一致 (字节相同)")
+            else:
+                print(f"  {bf.name}: 有差异 (字节不同)")
+                changed += 1
+    print(f"汇总: {total} 张对比, {changed} 张有差异" + (" (0 差异即视觉回归通过)" if changed == 0 else " (差异截图需人/视觉模型确认是否可接受)"))
+    return 0
+
+
+def _detect_diff_tool():
+    """返回可用 diff 工具: compare (ImageMagick) | pil | hash (字节兜底)."""
+    try:
+        r = subprocess.run(["compare", "-version"], capture_output=True, text=True,
+                           check=False, timeout=10)
+        if r.returncode == 0:
+            return "compare"
+    except Exception:
+        pass
+    try:
+        r = subprocess.run([sys.executable, "-c", "import PIL"], capture_output=True,
+                           text=True, check=False, timeout=10)
+        if r.returncode == 0:
+            return "pil"
+    except Exception:
+        pass
+    return None
+
+
+def _diff_imagemagick(a: Path, b: Path):
+    """ImageMagick compare: 返回差异像素数 (AE metric), 失败返回 None."""
+    try:
+        r = subprocess.run(
+            ["compare", "-metric", "AE", str(a), str(b), "null:"],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        out = (r.stdout + r.stderr).strip()
+        m = re.search(r"(\d+)", out)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def _diff_pil(a: Path, b: Path):
+    """python3+PIL: 像素级差异计数 (尺寸不同输出 SIZE_DIFF)."""
+    script = (
+        "import sys; from PIL import Image, ImageChops; "
+        "a=Image.open(sys.argv[1]).convert('RGB'); "
+        "b=Image.open(sys.argv[2]).convert('RGB'); "
+        "print('SIZE_DIFF') if a.size!=b.size else "
+        "print(sum(1 for p in ImageChops.difference(a,b).getdata() if p!=(0,0,0)))"
+    )
+    try:
+        r = subprocess.run([sys.executable, "-c", script, str(a), str(b)],
+                           capture_output=True, text=True, check=False, timeout=60)
+        out = (r.stdout + r.stderr).strip()
+        if "SIZE_DIFF" in out:
+            return None
+        m = re.search(r"(\d+)", out)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def _diff_hash(a: Path, b: Path):
+    """字节哈希对比 (无像素工具兜底): 只判同/异."""
+    try:
+        return a.read_bytes() == b.read_bytes()
+    except Exception:
+        return None
 
 
 def cmd_new(args) -> int:
@@ -1179,7 +1306,7 @@ def cmd_new(args) -> int:
     text = template_card(title, kind)
     if frontend:
         # 前端任务验收清单: 只含 L0/L1/L2 (执行 Agent 任务内完成);
-        # L3 (浏览器 E2E + 截图) 是独立阶段, 由 kanban verify-ui <task-id> 单独执行, 不进卡.
+        # L3 (浏览器 E2E + 截图) 是独立阶段, 由 kanban e2e <task-id> 单独执行, 不进卡.
         text = text.replace(
             "## 验收条件\n\n- [ ] <填写>",
             "## 验收条件 (前端 L0-L2)\n\n"
@@ -1188,7 +1315,7 @@ def cmd_new(args) -> int:
             "- [ ] L2 接口: 页面调用的后端接口行为正确 (curl/实测)\n",
             1,
         )
-        text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E 验证: 独立阶段, 用 kanban verify-ui 执行(不在本任务内)。\n", 1)
+        text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E: 独立阶段, 用 kanban e2e 执行(不在本任务内);L4 视觉回归用 kanban visual。\n", 1)
     if spec_file:
         if not spec_file.exists():
             raise KanbanError(f"需求文档不存在: {spec_file}")
@@ -2008,8 +2135,10 @@ def main(argv) -> int:
             return cmd_new(args)
         if cmd == "req-status":
             return cmd_req_status(args)
-        if cmd == "verify-ui":
-            return cmd_verify_ui(args)
+        if cmd == "e2e":
+            return cmd_e2e(args)
+        if cmd == "visual":
+            return cmd_visual(args)
         if cmd == "upgrade":
             return cmd_upgrade(args)
         if cmd == "pick":

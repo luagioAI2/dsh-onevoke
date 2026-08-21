@@ -76,11 +76,12 @@
 - 项目根 `.dsh-onevoke.yml` 查找已移除;配置只认 `kanban/` 内:`kanban/.dsh-onevoke.yml`(模型/审核/权限)、`RULES.md`(项目规则)、`MEMORY.md`(记忆)。
 - `kanban init` 幂等生成 3 个模板;kanban/ 整体被 `.git/info/exclude` 排除,配置天然本地个人。
 
-### 5.7 L3 浏览器 E2E 独立阶段(verify-ui)
-- `kanban verify-ui <task-id>`:建 `docs/screenshots/<task-id>/` 目录 + 打印执行指引;实际浏览器 E2E 由 Agent 按技能执行(起服务 → 走关键流程 → 截图 → 记录卡片)。
+### 5.7 L3/L4 前端验证独立阶段(e2e + visual)
+- `kanban e2e <task-id>`(原 verify-ui 改名):建 `docs/screenshots/<task-id>/` 目录 + 打印执行指引;实际浏览器 E2E 由 Agent 按技能执行(起服务 → 走关键流程 → 截图 → 记录卡片)。
+- 新增 `kanban visual <task-id>`:L4 视觉回归 — 首次建 `visual/baseline/` 存基线,之后截图放 `visual/current/` 同名自动 diff;diff 工具自动检测 ImageMagick compare → python3+PIL → 字节哈希兜底。
+- 实测(captcha-task):e2e 改名后命令正常;visual 像素 diff 精确(20x20 红块 = 441 像素差异,恢复后 0 差异);Pillow 12.3.0 用户级安装后 PIL 路径生效;无工具时 hash 兜底仅判同/异。
 - 截图优先用 DSH 自带 `browser` 工具(dsh-browser-playwright 插件, `browser_screenshot` 等);无浏览器退回 Playwright 脚本或手动。
-- 实测(captcha-task, Chromium):登录页渲染正常、连续 3 次失败 401、无 pageerror,3 张截图入库;卡片 L3 记录补齐。
-- `kanban new --frontend` 只嵌 L0/L1/L2 到验收条件,L3 独立不进卡。
+- `kanban new --frontend` 只嵌 L0/L1/L2 到验收条件,L3/L4/L5 独立不进卡(技能已改为 L0-L5 全谱: L5 视觉还原必须人/视觉模型判定,Agent 禁替判"像不像")。
 
 ### 5.8 design 阶段:需求仓库(design → kanban)
 - 新增 `kanban design init|new|list|show` + `req-status/list` 支持 `--type/--module` 筛选。
