@@ -104,40 +104,47 @@ tmux new -s main
 dsh --profile tui
 ```
 
-## 2.5 前置阶段衔接(头脑风暴 → 需求文档 → 看板)
+## 2.5 前置阶段衔接(design → kanban: 需求仓库 → 看板)
 
-**前置(多天讨论)不进看板**: 主会话正常对话,产出沉淀为项目文档(进 git,团队共享,跨会话不丢):
-
-```bash
-mkdir -p docs
-# 时间线: 需求池(第1天起,持续) → decisions(第3天,取舍) → architecture(第5天,方案) → backlog(第6天,拍板)
-```
-
-| 文档 | 内容 | 谁写 |
-|---|---|---|
-| `docs/requirements.md` | 需求池: `## REQ-004 标题` + `- 优先级/动机/期望/验收/威胁/范围` | 主会话 Agent(引导提问) |
-| `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | Agent |
-| `docs/architecture.md` | 技术方案: 选型/模块/边界/数据流 | 主会话切 plan 模型(强思考); 可 subagent 复核 |
-| `docs/backlog.md` | 拍板清单: 本轮要做的 REQ 编号(按优先级) | 用户拍板 + Agent 整理 |
-
-```markdown
-# 本轮拍板 backlog (2026-08-21)
-1. REQ-004 验证码 (P1) — 决定: 做
-2. REQ-005 会话过期 (P2) — 决定: 暂缓
-```
-
-**多轮头脑风暴 = 往 `docs/requirements.md` 追加 REQ 条目**(不覆盖旧的)。核对与去重(按优先级排序):
+**前置(多天讨论)不进看板**: 主会话正常对话,产出沉淀为**需求仓库** `requirements/`
+(进 git,团队共享,跨会话不丢;多模块/多游戏项目按团队类型分目录,不再单文档平铺):
 
 ```bash
-kanban req-status docs/requirements.md
-# [P1] REQ-001 登录失败锁定  → 看板 20260820-login-lock-task [done]
-# [P2] REQ-004 验证码        → 未建卡
+kanban design init        # 幂等: 生成 tech/ art/ balance/ + specs/ 规范模板 + README
 ```
 
-**正式看板化**(按 backlog.md 逐条;自动导入契约,已建卡的 REQ 会被拒绝防重复):
+| 目录 | 类型 | 编号 | 规范 | 谁写 |
+|---|---|---|---|---|
+| `requirements/tech/` | 技术需求 | REQ-T-NNN | `specs/tech.md` | 主会话 Agent(引导提问) |
+| `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) | 主会话 Agent |
+| `requirements/balance/` | 数值需求 | REQ-B-NNN | `specs/balance.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
+| `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | — | Agent |
+| `docs/architecture.md` | 技术方案: 选型/模块/边界/数据流 | — | 主会话切 plan 模型(强思考); 可 subagent 复核 |
+
+**建需求文件**(每需求一个文件,编号自动递增,状态默认「待评审」):
 
 ```bash
-kanban new --spec-file docs/requirements.md --req REQ-004 feature captcha 验证码 --review light
+kanban design new --type tech --module login --title "登录接口限流" --pri P1
+kanban design new --type art --module login --title "登录页视觉改版" --pri P0
+kanban design new --type balance --module login --title "失败锁定阈值平衡" --pri P2
+```
+
+头部字段: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
+(技术约束|产出规范|数值规范)/不在本轮范围。旧式单文档 `docs/requirements.md`(`## REQ-004`)仍兼容。
+
+**多轮头脑风暴 = 追加新需求文件**(不覆盖旧的)。核对与去重(按优先级排序,含看板映射):
+
+```bash
+kanban design list                    # 全部, 含 → 看板 xxx [state]
+kanban design list --type tech        # 只列技术需求
+kanban req-status requirements        # 等价核对 (也可指旧式单文档)
+```
+
+**评审拍板**: 需求头部 `- 状态:` 改「已拍板」。**正式看板化**(按需求逐条;自动导入契约:
+需求描述→任务目标, 验收标准→验收条件, 范围→不在本轮范围, 类型/模块→卡片头部;已建卡的 REQ 拒绝防重复):
+
+```bash
+kanban new --spec-file requirements --req REQ-T-001 feature rate-limit 登录接口限流 --review light
 ```
 
 在 TUI 里输入(可直接粘贴):

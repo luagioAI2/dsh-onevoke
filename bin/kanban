@@ -42,10 +42,15 @@ PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填", "填�
 
 USAGE = """用法:
   kanban init [path] [--agents]           幂等创建看板和 6 个状态目录; --agents 另给项目 AGENTS.md 写 opt-in 入口
-  kanban list [state] [--mobile]           列出卡片 (默认全部状态; 大任务标 [large])
+  kanban design init                      初始化需求仓库 requirements/ (tech|art|balance + specs 规范)
+  kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]
+                                           新建需求文件 (自动编号 REQ-T/A/B-NNN)
+  kanban design list [--type t] [--module m] [--status s]   列出需求仓库 (含看板映射)
+  kanban design show <REQ-ID|文件路径>    查看需求文件
+  kanban list [state] [--mobile] [--type t] [--module m]  列出卡片 (默认全部状态; 大任务标 [large])
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
-  kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
-  kanban req-status [需求文档]           核对需求文档 REQ 条目与看板卡状态 (默认 docs/requirements.md)
+  kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档|需求仓库> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
+  kanban req-status [需求文档|需求仓库] [--type t] [--module m]  核对需求条目与看板卡状态
   kanban verify-ui <task-id>              L3 浏览器 E2E 验证 (独立阶段)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
   kanban start [--no-window] [--ignore-deps] [task-id]
@@ -409,6 +414,200 @@ BOARD_MEMORY_TEMPLATE = """# 本看板跨任务记忆 (kanban/MEMORY.md)
 """
 
 
+# ---- 需求仓库 (design 阶段) 模板: requirements/ ----
+# 目录: tech/ (技术需求 REQ-T-NNN) | art/ (美术需求 REQ-A-NNN) | balance/ (数值需求 REQ-B-NNN)
+# 每需求一个文件; 头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求
+
+REQ_COMMON_FIELDS = """- 类型: {rtype}
+- 模块: {module}
+- 优先级: {pri}
+- 状态: 待评审
+- 需求来源: <头脑风暴/决策记录, 填对应会议或文档>
+- 关联需求: N/A
+"""
+
+REQ_TEMPLATE_TECH = """# REQ-T-{num:03d} {title}
+
+{common}
+## 需求描述
+
+<动机/期望: 要解决什么问题, 谁用, 期望效果>
+
+## 验收标准
+
+- [ ] <逐条可验证, 含边界与失败路径>
+
+## 技术约束
+
+- 架构: <引用 requirements/specs/tech.md 或 docs/architecture.md 相关章节>
+- 接口契约: <请求/响应/错误码; 无接口则 N/A>
+- 技术栈/依赖限制: <按 specs/tech.md 约定>
+
+## 不在本轮范围
+
+- <明确不做的部分, 防范围蔓延>
+"""
+
+REQ_TEMPLATE_ART = """# REQ-A-{num:03d} {title}
+
+{common}
+## 需求描述
+
+<视觉/交互目标: 场景、风格基调、给玩家的感受>
+
+## 验收标准
+
+- [ ] <逐条可验证: 尺寸/命名/交付物齐全、与规范一致>
+
+## 产出规范 (按 requirements/specs/art.md)
+
+- 设计分辨率: <如 1920x1080 / 750x1334>
+- 产出文件夹: art/<模块>/<子模块>/ (效果图 + 切图分开)
+- 交付物:
+  - 效果图: <预览图>
+  - 切图: <@1x/@2x/@3x 或按平台命名>
+  - 通用 UI: <复用 requirements/specs/art.md 通用 UI 清单, 不重复制作>
+- 风格参考: <参考图/竞品/色板>
+
+## 不在本轮范围
+
+- <明确不做的部分, 防范围蔓延>
+"""
+
+REQ_TEMPLATE_BALANCE = """# REQ-B-{num:03d} {title}
+
+{common}
+## 需求描述
+
+<数值目标: 平衡什么, 玩家的体感期望>
+
+## 验收标准
+
+- [ ] <逐条可验证: 数值表项齐全、公式正确、边界不越界>
+
+## 数值规范 (按 requirements/specs/balance.md)
+
+- 数值表: <表名/字段/取值范围, 或指向配置文件的路径>
+- 公式/规则: <关键公式与参数>
+- 平衡目标: <期望的曲线/边界, 如胜率区间、成长斜率>
+- 调参记录: <每次调整: 日期/旧值/新值/理由>
+
+## 不在本轮范围
+
+- <明确不做的部分, 防范围蔓延>
+"""
+
+REQ_SPEC_TECH = """# 技术需求规范 (requirements/specs/tech.md)
+
+技术团队的需求统一走需求仓库: requirements/tech/REQ-T-NNN.md, 评审拍板后由
+`kanban new --spec-file requirements/ --req REQ-T-NNN` 转看板执行。
+
+## 需求文件要求
+
+- 每需求一个文件, 编号自动递增 (kanban design new --type tech);
+- 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;
+- 必含章节: 需求描述 / 验收标准 / 技术约束 / 不在本轮范围。
+
+## 技术架构文档
+
+- 架构决策集中维护在 docs/architecture.md (或本文件后续章节);
+- 需求里的「技术约束-架构」引用架构文档章节, 不重复全文;
+- 架构变更必须先改架构文档再转看板, 禁止边做边定架构。
+
+## 工程约定 (按项目实际情况维护)
+
+- 技术栈/语言/框架版本
+- 目录结构
+- 测试要求 (单测/集成/覆盖率)
+- 禁止事项 (如禁引非标准库依赖)
+
+## 转看板
+
+- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-T-NNN <feature|bug|chore|research> <slug> <标题>`
+- 需求模块/类型/来源自动写入卡片, 验收条件带入需求验收标准。
+"""
+
+REQ_SPEC_ART = """# 美术需求规范 (requirements/specs/art.md)
+
+美术团队的需求统一走需求仓库: requirements/art/REQ-A-NNN.md, 评审拍板后由
+`kanban new --spec-file requirements/ --req REQ-A-NNN` 转看板执行。
+
+## 设计分辨率
+
+- 项目统一设计分辨率: <如 1920x1080 横屏 / 750x1334 竖屏, 按项目填写>;
+- 所有效果图按此分辨率出, 标注清晰区/安全区。
+
+## 产出文件夹
+
+- 每个美术需求在 art/<模块>/<子模块>/ 下产出, 效果图与切图分目录:
+  - 效果图: <模块>/<子模块>/preview/ (预览图, 命名 01-xxx.png 起)
+  - 切图:   <模块>/<子模块>/export/ (命名与格式按平台规范, 如 xxx@2x.png)
+- 通用 UI (按钮/弹窗/滚动条等): 进 art/common/ 或公共 UI 库, 禁止各模块重复制作;
+- 新通用件入库前标注用途与适用模块。
+
+## 交付物清单 (每需求必查)
+
+- [ ] 效果图 (设计稿)
+- [ ] 切图 (按平台规范导出)
+- [ ] 通用 UI 复用说明 (或说明新增原因)
+- [ ] 与设计分辨率/命名规范一致
+
+## 转看板
+
+- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-A-NNN <feature|bug|chore|research> <slug> <标题>`
+- 美术产出验收 (L0-L2) 在任务卡内完成, 浏览器/实际效果截图用 kanban verify-ui。
+"""
+
+REQ_SPEC_BALANCE = """# 数值需求规范 (requirements/specs/balance.md)
+
+数值团队的需求统一走需求仓库: requirements/balance/REQ-B-NNN.md, 评审拍板后由
+`kanban new --spec-file requirements/ --req REQ-B-NNN` 转看板执行。
+
+## 需求文件要求
+
+- 每需求一个文件, 编号自动递增 (kanban design new --type balance);
+- 必含章节: 需求描述 / 验收标准 / 数值规范 (数值表+公式+平衡目标+调参记录)。
+
+## 数值表
+
+- 数值集中维护在配置文件/表格 (如 config/balance/ 下), 需求文件引用表名与字段, 不内嵌全表;
+- 表格字段: 字段名/类型/取值范围/默认值/说明;
+- 配置热更与校验: 数值改动走配置发布, 禁止硬编码在代码里。
+
+## 平衡性
+
+- 每项数值需求写明平衡目标 (如胜率区间 45%-55%、成长斜率、产出-消耗比);
+- 调整必须留调参记录 (日期/旧值/新值/理由), 便于回溯。
+
+## 转看板
+
+- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-B-NNN <feature|bug|chore|research> <slug> <标题>`
+"""
+
+REQ_README = """# 需求仓库 (requirements/)
+
+design 阶段产出: 把项目/多模块/多游戏的需求按团队类型分目录归档, 每个需求一个文件,
+评审拍板后各团队取属于自己的需求转 kanban 执行。整体流程: design → kanban。
+
+| 目录 | 类型 | 编号 | 规范文档 |
+|------|------|------|----------|
+| requirements/tech/ | 技术需求 | REQ-T-NNN | specs/tech.md |
+| requirements/art/ | 美术需求 | REQ-A-NNN | specs/art.md |
+| requirements/balance/ | 数值需求 | REQ-B-NNN | specs/balance.md |
+
+## 常用命令
+
+- 建需求: `kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]`
+- 列表 (含看板映射): `kanban design list [--type t] [--module m] [--status s]`
+- 查看: `kanban design show REQ-T-001`
+- 转看板: 状态改为「已拍板」后 `kanban new --spec-file requirements/ --req REQ-T-001 <kind> <slug> <标题>`
+
+## 状态流转
+
+待评审 → 已拍板 (评审通过) → 已转看板 (kanban new 后) → 已实现 (对应卡 done)
+"""
+
+
 def _write_board_templates(root: Path) -> None:
     """kanban init 生成看板配置/规则/记忆模板 (仅当不存在, 幂等)."""
     for name, content in ((".dsh-onevoke.yml", BOARD_CONFIG_TEMPLATE),
@@ -420,10 +619,243 @@ def _write_board_templates(root: Path) -> None:
             print(f"已生成模板: {p} (注释掉即默认, 按需修改)")
 
 
+def _req_root() -> Path:
+    """需求仓库根目录: 项目根/requirements (与 kanban/ 平级)."""
+    return board_root().parent / "requirements"
+
+
+def _req_next_num(req_dir: Path, rtype: str) -> int:
+    """该类型目录下下一编号: 扫描 REQ-<TYPE>-NNN.md 取最大 + 1."""
+    prefix = "REQ-" + rtype[0].upper() + "-"
+    nums = []
+    if req_dir.is_dir():
+        for f in req_dir.glob("*.md"):
+            m = re.match(rf"^{re.escape(prefix)}(\d{{3}})", f.name)
+            if m:
+                nums.append(int(m.group(1)))
+    return (max(nums) + 1) if nums else 1
+
+
+def _req_status_rank(status: str) -> int:
+    return {"待评审": 0, "已拍板": 1, "已转看板": 2, "已实现": 3}.get(status, 9)
+
+
+def cmd_design(args) -> int:
+    """kanban design <init|new|list|show> — 需求仓库 (design 阶段, 转 kanban 前)."""
+    if not args:
+        raise KanbanError("kanban design 需要子命令: init|new|list|show")
+    sub, rest = args[0], args[1:]
+    if sub == "init":
+        return _design_init(rest)
+    if sub == "new":
+        return _design_new(rest)
+    if sub == "list":
+        return _design_list(rest)
+    if sub == "show":
+        return _design_show(rest)
+    raise KanbanError(f"未知 design 子命令: {sub} (可用: init|new|list|show)")
+
+
+def _design_init(args) -> int:
+    """kanban design init — 幂等创建需求仓库骨架 + 规范文档."""
+    if args:
+        raise KanbanError("kanban design init 不带参数")
+    req_root = _req_root()
+    (req_root / "tech").mkdir(parents=True, exist_ok=True)
+    (req_root / "art").mkdir(parents=True, exist_ok=True)
+    (req_root / "balance").mkdir(parents=True, exist_ok=True)
+    specs = req_root / "specs"
+    specs.mkdir(parents=True, exist_ok=True)
+    created = 0
+    for name, content in (("README.md", REQ_README),
+                          ("specs/tech.md", REQ_SPEC_TECH),
+                          ("specs/art.md", REQ_SPEC_ART),
+                          ("specs/balance.md", REQ_SPEC_BALANCE)):
+        p = req_root / name
+        if not p.exists():
+            p.write_text(content, encoding="utf-8")
+            created += 1
+    print(f"需求仓库: {req_root} (tech|art|balance 各一目录, 已建)")
+    if created:
+        print(f"已生成规范文档: {created} 份 (README.md, specs/tech.md, specs/art.md, specs/balance.md)")
+    else:
+        print("规范文档已存在, 跳过 (幂等)")
+    print("建需求: kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]")
+    return 0
+
+
+def _design_new(args) -> int:
+    """kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]
+    新建需求文件, 编号自动递增; 状态默认「待评审」."""
+    rtype = None
+    module = None
+    title = None
+    pri = "P2"
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--type":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--type 需要 tech|art|balance")
+            rtype = args[i]
+        elif a == "--module":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--module 需要 <模块名>")
+            module = args[i]
+        elif a == "--title":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--title 需要 <需求标题>")
+            title = args[i]
+        elif a == "--pri":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--pri 需要 P0|P1|P2|P3")
+            pri = args[i]
+        else:
+            raise KanbanError(f"未知选项: {a}")
+        i += 1
+    if rtype not in REQ_TYPES:
+        raise KanbanError(f"--type 必须是 {'/'.join(REQ_TYPES)} (tech 技术|art 美术|balance 数值)")
+    if not module:
+        raise KanbanError("--module 必填 (模块/游戏名)")
+    if not title:
+        raise KanbanError("--title 必填 (需求标题)")
+    if pri not in ("P0", "P1", "P2", "P3"):
+        raise KanbanError("--pri 只能是 P0|P1|P2|P3")
+    req_root = _req_root()
+    if not (req_root / "specs" / "tech.md").exists():
+        raise KanbanError(f"需求仓库未初始化: {req_root} (先 kanban design init)")
+    req_dir = req_root / REQ_TYPE_DIRS[rtype]
+    req_dir.mkdir(parents=True, exist_ok=True)
+    num = _req_next_num(req_dir, rtype)
+    rid = f"REQ-{rtype[0].upper()}-{num:03d}"
+    common = REQ_COMMON_FIELDS.format(rtype=rtype, module=module, pri=pri)
+    tmpl = {"tech": REQ_TEMPLATE_TECH, "art": REQ_TEMPLATE_ART, "balance": REQ_TEMPLATE_BALANCE}[rtype]
+    text = tmpl.format(num=num, title=title, common=common)
+    f = req_dir / f"{rid}.md"
+    f.write_text(text, encoding="utf-8")
+    print(f"已创建需求: {f}")
+    print(f"  编号: {rid}  ({REQ_TYPE_LABELS[rtype]})  模块: {module}  优先级: {pri}")
+    print("  下一步: 填需求描述/验收标准 → 评审 → 状态改「已拍板」→ 转看板:")
+    print(f"    kanban new --spec-file {req_root} --req {rid} <feature|bug|chore|research> <slug> <标题>")
+    return 0
+
+
+def _design_list(args) -> int:
+    """kanban design list [--type t] [--module m] [--status s] — 需求仓库列表 (含看板映射)."""
+    rtype = None
+    module = None
+    status = None
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--type":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--type 需要 tech|art|balance")
+            rtype = args[i]
+            if rtype not in REQ_TYPES:
+                raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
+        elif a == "--module":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--module 需要 <模块名>")
+            module = args[i]
+        elif a == "--status":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--status 需要 <状态>")
+            status = args[i]
+        else:
+            rest.append(a)
+        i += 1
+    if rest:
+        raise KanbanError(f"未知参数: {' '.join(rest)}")
+    req_root = _req_root()
+    if not req_root.is_dir():
+        raise KanbanError(f"需求仓库不存在: {req_root} (先 kanban design init)")
+    reqs = _parse_reqs(req_root)
+    if not reqs:
+        print(f"需求仓库为空: {req_root} (kanban design new 建需求)")
+        return 0
+    root = board_root()
+    # 排序: 类型 (tech<art<balance) → 编号 → 状态流转
+    def sort_key(kv):
+        rid, info = kv
+        m = re.match(r"^REQ-([TAB])-(\d{3})$", rid)
+        t = m.group(1) if m else "Z"
+        n = int(m.group(2)) if m else 0
+        f = info["fields"]
+        return (t, n, _req_status_rank(f.get("状态", "")))
+    shown = 0
+    for rid, info in sorted(reqs.items(), key=sort_key):
+        f = info["fields"]
+        if rtype and f.get("类型") != rtype:
+            continue
+        if module and module not in f.get("模块", ""):
+            continue
+        if status and f.get("状态") != status:
+            continue
+        hit = _find_req_on_board(root, rid)
+        line = f"  {rid} {info['title']}  [{REQ_TYPE_LABELS.get(f.get('类型'), '?')}] [{f.get('模块', '-')}] [{f.get('优先级', '-')}] [{f.get('状态', '待评审')}]"
+        line += f"  → 看板 {hit[1]} [{hit[0]}]" if hit else "  → 未建卡"
+        print(line)
+        shown += 1
+    if shown == 0:
+        print("  (无匹配条目)")
+    return 0
+
+
+def _design_show(args) -> int:
+    """kanban design show <REQ-ID|文件路径> — 查看需求文件."""
+    if not args:
+        raise KanbanError("kanban design show 需要 <REQ-ID> 或文件路径")
+    target = args[0]
+    req_root = _req_root()
+    if REQ_ID_RE.match(target):
+        m = re.match(r"^REQ-([TAB])-(\d{3})$", target)
+        rtype = REQ_LETTER_TO_TYPE[m.group(1)]
+        f = req_root / REQ_TYPE_DIRS[rtype] / f"{target}.md"
+        if not f.is_file():
+            raise KanbanError(f"找不到需求文件: {target} (在 {req_root}/<type>/ 下)")
+    else:
+        f = Path(target).resolve()
+        if not f.is_file():
+            raise KanbanError(f"找不到需求文件: {target}")
+    print(read_any_text(f))
+    return 0
+
+
 def cmd_list(args) -> int:
     root = board_root()
     mobile = "--mobile" in args
-    states = [a for a in args if a in STATES]
+    rtype = None
+    module = None
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--type":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--type 需要 tech|art|balance")
+            rtype = args[i]
+            if rtype not in REQ_TYPES:
+                raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
+        elif a == "--module":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--module 需要 <模块名>")
+            module = args[i]
+        else:
+            rest.append(a)
+        i += 1
+    states = [a for a in rest if a in STATES]
     for state in states or list(STATES):
         state_dir = root / state
         rows = []
@@ -438,6 +870,14 @@ def cmd_list(args) -> int:
                 else:
                     continue
                 text = read_any_text(target)
+                if rtype:
+                    m = re.search(r"^- 需求类型:\s*(.+)$", text, re.M)
+                    if not m or REQ_TYPE_LABELS.get(rtype) != m.group(1).strip():
+                        continue
+                if module:
+                    m = re.search(r"^- 模块:\s*(.+)$", text, re.M)
+                    if not m or module not in m.group(1):
+                        continue
                 m = re.search(r"^- 类型:\s*(.+)$", text, re.M)
                 t = m.group(1).strip() if m else "?"
                 m = re.search(r"^- (开始时间|完成时间):\s*(.+)$", text, re.M)
@@ -464,26 +904,78 @@ def cmd_show(args) -> int:
     return 0
 
 
-REQ_HEAD_RE = re.compile(r"^##\s+(REQ-\d+)\s+(.+)$", re.M)
+# REQ 编号: 旧式全局 REQ-004, 新式分类型 REQ-T-001 (技术) / REQ-A-001 (美术) / REQ-B-001 (数值)
+REQ_HEAD_RE = re.compile(r"^#{1,2}\s+(REQ-(?:[TAB]-)?\d+)\s+(.+)$", re.M)
+REQ_ID_RE = re.compile(r"^REQ-(?:[TAB]-)?\d+$")
+REQ_TYPES = ("tech", "art", "balance")
+REQ_TYPE_LABELS = {"tech": "技术", "art": "美术", "balance": "数值"}
+REQ_TYPE_DIRS = {"tech": "tech", "art": "art", "balance": "balance"}
+REQ_LETTER_TO_TYPE = {"T": "tech", "A": "art", "B": "balance"}
 
 
 def _parse_reqs(path: Path):
-    """解析需求文档 -> {REQ-ID: {title, fields}}.
-    约定: `## REQ-004 标题` 起, 到下个 `## ` 为止; 块内 `- 键: 值` 进 fields
-    (键: 优先级/动机/期望/验收/威胁/范围)."""
-    text = read_any_text(path)
+    """解析需求文档/需求仓库 -> {REQ-ID: {title, fields, path}}.
+    兼容两种形态:
+      - 旧式单文档多条目: `## REQ-004 标题` 起, 到下个 `## ` 为止; 块内 `- 键: 值` 进 fields
+      - 新式需求仓库 requirements/: 按类型分目录 (tech|art|balance), 每需求一个文件
+        `# REQ-T-001 标题` 起; 头部 `- 键: 值` 进 fields (键: 类型/模块/优先级/状态/
+        动机/期望/验收/威胁/范围/关联需求); 章节「需求描述」首段进 期望,
+        「验收标准」下 `- ` 行进 验收 (多条以换行拼接).
+    path 可以是单个文件或目录; 目录递归收集各类型 REQ-*.md."""
+    files = []
+    if path.is_dir():
+        for sub in path.iterdir():
+            if sub.is_dir() and sub.name in REQ_TYPE_DIRS.values():
+                files.extend(sorted(sub.glob("REQ-*.md")))
+    elif path.is_file():
+        files = [path]
+    else:
+        return {}
     reqs = {}
-    cur = None
-    for line in text.splitlines():
-        m = REQ_HEAD_RE.match(line)
-        if m:
-            reqs[m.group(1)] = {"title": m.group(2).strip(), "fields": {}}
-            cur = m.group(1)
-            continue
-        if cur:
-            m = re.match(r"^\s*-\s*([^:：]+)[:：]\s*(.+)$", line)
+    for f in files:
+        text = read_any_text(f)
+        cur = None
+        section = None
+        desc_lines = []
+        accept_lines = []
+        scope_lines = []
+        for line in text.splitlines():
+            m = REQ_HEAD_RE.match(line)
             if m:
-                reqs[cur]["fields"][m.group(1).strip()] = m.group(2).strip()
+                reqs[m.group(1)] = {"title": m.group(2).strip(), "fields": {}, "path": f}
+                cur = m.group(1)
+                section = None
+                desc_lines, accept_lines, scope_lines = [], [], []
+                continue
+            if not cur:
+                continue
+            sm = re.match(r"^##\s+(.+)$", line)
+            if sm:
+                section = sm.group(1).strip()
+                continue
+            fm = re.match(r"^\s*-\s*([^:：]+)[:：]\s*(.+)$", line)
+            if fm:
+                reqs[cur]["fields"][fm.group(1).strip()] = fm.group(2).strip()
+                continue
+            if section == "需求描述":
+                s = line.strip()
+                if s and not s.startswith("-"):
+                    desc_lines.append(s)
+            elif section == "验收标准":
+                s = line.strip()
+                if s.startswith("-"):
+                    accept_lines.append(re.sub(r"^-\s*(\[[ xX]\]\s*)?", "", s))
+            elif section == "不在本轮范围":
+                s = line.strip()
+                if s.startswith("-"):
+                    scope_lines.append(re.sub(r"^-\s*", "- ", s))
+        flds = reqs[cur]["fields"]
+        if desc_lines and not flds.get("期望"):
+            flds["期望"] = " ".join(desc_lines)
+        if accept_lines:
+            flds["验收"] = "\n".join(a for a in accept_lines if a)
+        if scope_lines:
+            flds["范围"] = "\n".join(scope_lines)
     return reqs
 
 
@@ -502,24 +994,66 @@ def _priority_key(info) -> tuple:
 
 
 def cmd_req_status(args) -> int:
-    """kanban req-status [需求文档] — 核对需求文档条目与看板卡的对应状态 (按优先级排序)."""
-    doc = Path(args[0]) if args else Path.cwd() / "docs" / "requirements.md"
-    if not doc.is_file():
+    """kanban req-status [需求文档|需求仓库] [--type tech|art|balance] [--module <名>]
+    — 核对需求条目与看板卡状态 (按优先级排序).
+    默认扫描项目根 requirements/ 需求仓库; 无仓库时回退 docs/requirements.md."""
+    rtype = None
+    module = None
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--type":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--type 需要 tech|art|balance")
+            rtype = args[i]
+            if rtype not in REQ_TYPES:
+                raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
+        elif a == "--module":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--module 需要 <模块名>")
+            module = args[i]
+        else:
+            rest.append(a)
+        i += 1
+    project = board_root().parent
+    if rest:
+        doc = Path(rest[0])
+    else:
+        req_root = project / "requirements"
+        doc = req_root if req_root.is_dir() else project / "docs" / "requirements.md"
+    if not doc.exists():
         raise KanbanError(f"需求文档不存在: {doc} (可用 kanban req-status <路径>)")
     reqs = _parse_reqs(doc)
     if not reqs:
-        print(f"{doc}: 未找到 REQ 条目 (格式: ## REQ-004 标题 + - 键: 值)")
+        if doc.is_dir():
+            print(f"{doc}: 需求仓库为空 (kanban design new --type tech|art|balance 建需求)")
+        else:
+            print(f"{doc}: 未找到 REQ 条目 (格式: ## REQ-004 标题 或 需求仓库 REQ-T/A/B-NNN 文件)")
         return 0
     root = board_root()
-    print(f"需求文档: {doc}")
+    shown = 0
+    print(f"需求来源: {doc}" + (" (目录)" if doc.is_dir() else ""))
     for rid, info in sorted(reqs.items(), key=lambda kv: _priority_key(kv[1])):
-        pri = info["fields"].get("优先级", "-")
+        f = info["fields"]
+        if rtype and f.get("类型") != rtype:
+            continue
+        if module and module not in f.get("模块", ""):
+            continue
+        pri = f.get("优先级") or "-"
+        mod = f.get("模块") or "-"
+        st = f.get("状态") or "-"
         hit = _find_req_on_board(root, rid)
         if hit:
             state, tid = hit
-            print(f"  [{pri:>2}] {rid} {info['title']}  → 看板 {tid} [{state}]")
+            print(f"  [{pri:>2}] {rid} {info['title']}  [模块:{mod}] [{st}]  → 看板 {tid} [{state}]")
         else:
-            print(f"  [{pri:>2}] {rid} {info['title']}  → 未建卡")
+            print(f"  [{pri:>2}] {rid} {info['title']}  [模块:{mod}] [{st}]  → 未建卡")
+        shown += 1
+    if shown == 0:
+        print("  (无匹配条目)")
     return 0
 
 
@@ -625,28 +1159,28 @@ def cmd_new(args) -> int:
         )
         text = text.replace("## 讨论与决策\n", "## 讨论与决策\n\nL3 浏览器 E2E 验证: 独立阶段, 用 kanban verify-ui 执行(不在本任务内)。\n", 1)
     if spec_file:
-        if not spec_file.is_file():
+        if not spec_file.exists():
             raise KanbanError(f"需求文档不存在: {spec_file}")
         reqs = _parse_reqs(spec_file)
         if not req_id:
-            avail = ", ".join(reqs) if reqs else "(文档无 REQ 条目)"
+            avail = ", ".join(reqs) if reqs else "(无 REQ 条目)"
             raise KanbanError(f"--spec-file 需要配合 --req 指定条目; 可用: {avail}")
         if req_id not in reqs:
-            raise KanbanError(f"文档 {spec_file} 没有 {req_id}")
+            raise KanbanError(f"来源 {spec_file} 没有 {req_id}")
         dup = _find_req_on_board(root, req_id)
         if dup:
             state, tid = dup
             if state == "done":
                 raise KanbanError(
                     f"{req_id} 已实现并 done ({tid}); 请勿重复建卡。"
-                    f"若确需重做, 先在需求文档更新后换新编号。"
+                    f"若确需重做, 先在需求仓库更新后换新编号。"
                 )
             raise KanbanError(f"{req_id} 已有进行中卡 ({tid} @ {state}); 如需重开请先处理该卡")
         f = reqs[req_id]["fields"]
         goal = f.get("期望") or f.get("动机") or f.get("目标") or "<填写>"
         accept = f.get("验收") or "<填写>"
         threat = f.get("威胁") or "N/A"
-        scope = f.get("范围") or f"- 详见需求文档 {req_id}"
+        scope = f.get("范围") or f"- 详见需求来源 {req_id}"
         text = text.replace("<填写>\n\n## 用户决策", f"{goal}\n\n## 用户决策")
         text = text.replace("## 用户决策\n\nN/A", "## 用户决策\n\n按需求文档执行 (需求来源见 讨论与决策)。")
         if accept != "<填写>":
@@ -654,11 +1188,19 @@ def cmd_new(args) -> int:
             text = text.replace("- [ ] <填写>", checks)
         text = text.replace("## 威胁模型\n\nN/A", f"## 威胁模型\n\n{threat}")
         text = text.replace("- <填写>\n\n## 讨论与决策", f"{scope}\n\n## 讨论与决策")
+        # 需求类型/模块: 写入卡片头部 (需求仓库分类型需求; 旧式单文档无则跳过)
+        req_type = f.get("类型")
+        if req_type in REQ_TYPES:
+            text = text.replace("- 创建时间: ", f"- 需求类型: {REQ_TYPE_LABELS[req_type]}\n- 创建时间: ", 1)
+        req_module = f.get("模块")
+        if req_module:
+            text = text.replace("- 创建时间: ", f"- 模块: {req_module}\n- 创建时间: ", 1)
+        src_disp = str(reqs[req_id].get("path") or spec_file)
         text = text.replace(
             "## 讨论与决策\n",
-            f"## 讨论与决策\n\n需求来源: {req_id} {reqs[req_id]['title']} ({spec_file})\n", 1,
+            f"## 讨论与决策\n\n需求来源: {req_id} {reqs[req_id]['title']} ({src_disp})\n", 1,
         )
-        print(f"已从需求文档导入: {req_id} {reqs[req_id]['title']}")
+        print(f"已从需求来源导入: {req_id} {reqs[req_id]['title']}")
     review_label = {"light": "轻量", "standard": "标准", "full": "完整"}[review]
     text = text.replace("- 审核: 标准", f"- 审核: {review_label}", 1)
     if gid:
@@ -1425,6 +1967,8 @@ def main(argv) -> int:
     try:
         if cmd == "init":
             return cmd_init(args)
+        if cmd == "design":
+            return cmd_design(args)
         if cmd == "list":
             return cmd_list(args)
         if cmd == "show":

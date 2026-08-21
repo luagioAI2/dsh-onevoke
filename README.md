@@ -23,7 +23,7 @@ dsh --profile tui
 |---|---|
 | `cordis.patch.yml` | bundle patch: persona 加一行工作流指引 + 放大规则预算(64K→128K) |
 | `skills/onevoke/SKILL.md` | **工作流契约**(技能,按需加载): 看板模型/大任务/任务组/多会话/worktree/审核/完成报告 |
-| `bin/kanban` | 文件看板 CLI(Python 零依赖): init/list/show/new(小/大/组)/pick/start/move/check/group/upgrade/**web** |
+| `bin/kanban` | 文件看板 CLI(Python 零依赖): design(需求仓库)/init/list/show/new(小/大/组)/pick/start/move/check/group/upgrade/**web** |
 | `bin/onevoke-group` | 任务组编排脚本: 按依赖自动启动就绪卡, 轮询到整组完成 (`--plan`/`--dry-run`) |
 | `bin/onevoke-review` | 审核证据 + Git 门禁 + worktree 防篡改 + per-role reviewer 配置解析 |
 | `bin/create-session.mjs` | 按官方格式预建 DSH 会话 → 任务会话 id 稳定为 `kb-<task-id>` |
@@ -41,6 +41,27 @@ dsh plugin --profile tui add file:/path/to/dsh-onevoke
 # 3. 验证合成配置
 dsh --profile tui --dump-config
 ```
+
+## 流程:design → kanban
+
+整体分两段:**design(需求仓库)** 产出按团队类型归档的需求,评审拍板后**kanban** 转卡执行:
+
+```text
+头脑风暴 → requirements/ 需求仓库 (tech 技术 / art 美术 / balance 数值, 每需求一个文件)
+        → 评审拍板 (状态: 待评审 → 已拍板)
+        → kanban new --spec-file requirements --req REQ-T-001 转看板 → 执行 → done
+```
+
+- `kanban design init` — 幂等生成 `requirements/`(tech|art|balance 目录 + specs 规范模板 + README);
+- `kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0-P3]`
+  — 建需求文件,编号自动递增(REQ-T-NNN / REQ-A-NNN / REQ-B-NNN),状态默认「待评审」;
+- `kanban design list [--type t] [--module m] [--status s]` / `kanban design show REQ-T-001`
+  — 列表(含看板映射)与查看;
+- 各团队规范见 `requirements/specs/tech.md`(技术架构)、`art.md`(设计分辨率/产出文件夹/切图/通用UI)、
+  `balance.md`(数值表/公式/平衡目标/调参记录);多模块/多游戏按 `- 模块:` 字段归档;
+- 转看板自动导入契约: 需求描述→任务目标, 验收标准→验收条件, 不在本轮范围→范围,
+  类型/模块→卡片头部;已建卡的 REQ 拒绝防重复;
+- 旧式单文档 `docs/requirements.md`(`## REQ-004` 格式)仍兼容。
 
 ## 使用(操作跟之前差不多)
 

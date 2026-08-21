@@ -75,3 +75,16 @@
 ### 5.6 看板配置归一看板内
 - 项目根 `.dsh-onevoke.yml` 查找已移除;配置只认 `kanban/` 内:`kanban/.dsh-onevoke.yml`(模型/审核/权限)、`RULES.md`(项目规则)、`MEMORY.md`(记忆)。
 - `kanban init` 幂等生成 3 个模板;kanban/ 整体被 `.git/info/exclude` 排除,配置天然本地个人。
+
+### 5.7 L3 浏览器 E2E 独立阶段(verify-ui)
+- `kanban verify-ui <task-id>`:建 `docs/screenshots/<task-id>/` 目录 + 打印执行指引;实际浏览器 E2E 由 Agent 按技能执行(起服务 → 走关键流程 → 截图 → 记录卡片)。
+- 截图优先用 DSH 自带 `browser` 工具(dsh-browser-playwright 插件, `browser_screenshot` 等);无浏览器退回 Playwright 脚本或手动。
+- 实测(captcha-task, Chromium):登录页渲染正常、连续 3 次失败 401、无 pageerror,3 张截图入库;卡片 L3 记录补齐。
+- `kanban new --frontend` 只嵌 L0/L1/L2 到验收条件,L3 独立不进卡。
+
+### 5.8 design 阶段:需求仓库(design → kanban)
+- 新增 `kanban design init|new|list|show` + `req-status/list` 支持 `--type/--module` 筛选。
+- 需求仓库 `requirements/`(进 git 团队共享,与 kanban/ 本地排除相对):`tech/` REQ-T-NNN、`art/` REQ-A-NNN、`balance/` REQ-B-NNN,每需求一个文件,编号按类型自动递增;`specs/` 存 3 份团队规范模板(技术架构 / 美术:设计分辨率·产出文件夹·切图·通用UI / 数值:数值表·公式·平衡目标·调参记录)。
+- 转看板 `kanban new --spec-file requirements --req REQ-T-001` 自动导入:需求描述→任务目标、验收标准→验收条件、不在本轮范围→范围、类型/模块→卡片头部(`- 需求类型:` / `- 模块:`);已建卡 REQ 拒绝防重复;旧式单文档 `docs/requirements.md`(`## REQ-004`)仍兼容(正则 `REQ-(?:[TAB]-)?\d+` 双格式)。
+- 实测(login-app):init 幂等、多模块(login/combat)归档、类型独立编号(REQ-T-001/002、REQ-A-001、REQ-B-001)、筛选(list --type/--module/--status、req-status)、转卡契约全链、重复建卡拒绝、旧格式兼容。
+- 坑:占位符误判 — L3 记录正文含"填写"触发 PLACEHOLDERS 误报,文案避用占位符词;`REQ_TYPE_DIRS` 键为类型全名,`design show` 需经 `REQ_LETTER_TO_TYPE`(T/A/B→tech/art/balance)映射。

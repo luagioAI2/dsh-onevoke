@@ -61,9 +61,14 @@ kanban/
 
 ```text
 kanban init [path]                     幂等创建 6 个状态目录
-kanban list [backlog|todo|working|done|archived|trash] [--mobile]
+kanban design init                     初始化需求仓库 requirements/ (tech|art|balance + specs)
+kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0-P3]
+kanban design list [--type t] [--module m] [--status s]   需求仓库列表 (含看板映射)
+kanban design show <REQ-ID|文件路径>   查看需求文件
+kanban list [backlog|todo|working|done|archived|trash] [--mobile] [--type t] [--module m]
 kanban show <task-id>                  大任务显示 spec + plan + report
-kanban new [--large] [--group <gid>] [--deps id1,id2] <feature|bug|chore|research> <slug> <标题...>
+kanban new [--large] [--group <gid>] [--deps id1,id2] [--spec-file <文档|requirements> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
+kanban req-status [需求文档|requirements] [--type t] [--module m]  需求↔看板核对
 kanban pick [task-id]                  backlog → todo, 校验契约完整
 kanban start [--no-window] [--ignore-deps] [task-id]
                                        todo → working, 拉起新 DSH 会话 (校验前置依赖)
@@ -121,29 +126,39 @@ kanban check                           列出全部无效入口, 有则非零退
 2. 选 1:`kanban new` 建卡 → **立即用已确认内容填完整张卡** → `kanban pick <id>`(冻结契约,改任何一项须用户决策)。
 3. 选 2 按项目规则直接实施,不建卡;选 3 继续调整。
 
-## 前置阶段:头脑风暴与需求池
+## 前置阶段:design → kanban(需求仓库)
 
-需求未成型/发散讨论时(可能跨多天、多会话),**不进看板**,按以下方式沉淀:
+需求未成型/发散讨论时(可能跨多天、多会话),**不进看板**,先走 design 阶段沉淀到**需求仓库**
+(项目根 `requirements/`,进 git,团队共享,跨会话不丢;多模块/多游戏项目按此分团队归档):
+
+```text
+requirements/
+  tech/      技术需求  REQ-T-NNN.md   (规范: requirements/specs/tech.md)
+  art/       美术需求  REQ-A-NNN.md   (规范: requirements/specs/art.md: 设计分辨率/产出文件夹/切图/通用UI)
+  balance/   数值需求  REQ-B-NNN.md   (规范: requirements/specs/balance.md: 数值表/公式/平衡目标/调参记录)
+  specs/     各团队规范文档
+```
 
 - **引导提问**: 先问目标/约束/偏好/验收直觉,不急于给方案;发散后再收敛。
-- **产出到需求文档** `docs/requirements.md`(进 git,团队共享,跨会话不丢),条目格式:
-  ```markdown
-  ## REQ-004 登录验证码
-  - 优先级: P1
-  - 动机: 防暴力破解
-  - 期望: 登录页加 4 位图形验证码, 失败 5 次要求验证码
-  - 验收: 连续失败 5 次后要求输入验证码; 验证码 5 分钟过期
-  - 威胁: 验证码为本地演示, 无真实凭据
-  - 范围: 不做短信/邮件验证码
-  ```
-- 选型/架构结论写 `docs/architecture.md` 与 `docs/decisions.md`(ADR: 为什么这么选/备选/影响);稳定结论顺手进 `kanban/MEMORY.md`。
-- **多轮头脑风暴 = 往文档追加新 REQ 条目**(不覆盖旧的);用 `kanban req-status [docs/requirements.md]` 核对哪些已建卡/已实现,避免重复。
-- 用户确认需求清单后,正式看板化:
+- **初始化**: `kanban design init`(幂等,生成目录 + 规范模板;首次建需求前跑一次)。
+- **建需求文件**(每需求一个文件,编号自动递增):
   ```bash
-  kanban new --spec-file docs/requirements.md --req REQ-004 feature login-captcha 验证码
-  # 契约自动导入; 该 REQ 已在看板(任意状态)则拒绝, 防重复
+  kanban design new --type tech --module login --title "登录接口限流" --pri P1
+  # art/balance 同理; 单文档旧式格式 (docs/requirements.md, ## REQ-004) 仍兼容
   ```
-  需求文档没有的字段(如预期成果)由建卡 Agent 按验收推导补全。
+  文件头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
+  (技术约束|产出规范|数值规范)/不在本轮范围。选型/架构结论写 `docs/architecture.md` 与
+  `docs/decisions.md`(ADR: 为什么这么选/备选/影响);稳定结论顺手进 `kanban/MEMORY.md`。
+- **评审拍板**: 需求文件头部 `- 状态:` 由「待评审」改「已拍板」(评审通过后)。
+- **团队取需求转看板**(design → kanban 衔接点;该 REQ 已在看板任意状态则拒绝,防重复):
+  ```bash
+  kanban new --spec-file requirements --req REQ-T-001 feature rate-limit 登录接口限流
+  # 契约自动导入: 需求描述→任务目标, 验收标准→验收条件, 不在本轮范围→范围, 类型/模块→卡片头部
+  ```
+  需求没有的字段(如预期成果)由建卡 Agent 按验收推导补全。
+- **核对**: `kanban design list [--type t] [--module m] [--status s]`(含看板映射)/
+  `kanban req-status [requirements|文档] [--type t] [--module m]`;多轮头脑风暴 = 追加新需求文件,
+  不覆盖旧的。
 
 ## 任务 = 独立 DSH 会话(多会话)
 
