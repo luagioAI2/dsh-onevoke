@@ -61,8 +61,8 @@ kanban/
 
 ```text
 kanban init [path]                     幂等创建 6 个状态目录
-kanban design init                     初始化需求仓库 requirements/ (tech|art|balance + specs)
-kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0-P3]
+kanban design init                     初始化需求仓库 requirements/ (program|art|numeric + specs)
+kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0-P3]
 kanban design list [--type t] [--module m] [--status s]   需求仓库列表 (含看板映射)
 kanban design show <REQ-ID|文件路径>   查看需求文件
 kanban list [backlog|todo|working|done|archived|trash] [--mobile] [--type t] [--module m]
@@ -133,9 +133,9 @@ kanban check                           列出全部无效入口, 有则非零退
 
 ```text
 requirements/
-  tech/      技术需求  REQ-T-NNN.md   (规范: requirements/specs/tech.md)
+  program/   程序需求  REQ-P-NNN.md   (规范: requirements/specs/program.md)
   art/       美术需求  REQ-A-NNN.md   (规范: requirements/specs/art.md: 设计分辨率/产出文件夹/切图/通用UI)
-  balance/   数值需求  REQ-B-NNN.md   (规范: requirements/specs/balance.md: 数值表/公式/平衡目标/调参记录)
+  numeric/   数值需求  REQ-N-NNN.md   (规范: requirements/specs/numeric.md: 数值表/公式/平衡目标/调参记录)
   specs/     各团队规范文档
 ```
 
@@ -143,8 +143,8 @@ requirements/
 - **初始化**: `kanban design init`(幂等,生成目录 + 规范模板;首次建需求前跑一次)。
 - **建需求文件**(每需求一个文件,编号自动递增):
   ```bash
-  kanban design new --type tech --module login --title "登录接口限流" --pri P1
-  # art/balance 同理; 单文档旧式格式 (docs/requirements.md, ## REQ-004) 仍兼容
+  kanban design new --type program --module login --title "登录接口限流" --pri P1
+  # art/numeric 同理; 单文档旧式格式 (docs/requirements.md, ## REQ-004) 仍兼容
   ```
   文件头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
   (技术约束|产出规范|数值规范)/不在本轮范围。选型/架构结论写 `docs/architecture.md` 与
@@ -152,7 +152,7 @@ requirements/
 - **评审拍板**: 需求文件头部 `- 状态:` 由「待评审」改「已拍板」(评审通过后)。
 - **团队取需求转看板**(design → kanban 衔接点;该 REQ 已在看板任意状态则拒绝,防重复):
   ```bash
-  kanban new --spec-file requirements --req REQ-T-001 feature rate-limit 登录接口限流
+  kanban new --spec-file requirements --req REQ-P-001 feature rate-limit 登录接口限流
   # 契约自动导入: 需求描述→任务目标, 验收标准→验收条件, 不在本轮范围→范围, 类型/模块→卡片头部
   ```
   需求没有的字段(如预期成果)由建卡 Agent 按验收推导补全。

@@ -110,23 +110,23 @@ dsh --profile tui
 (进 git,团队共享,跨会话不丢;多模块/多游戏项目按团队类型分目录,不再单文档平铺):
 
 ```bash
-kanban design init        # 幂等: 生成 tech/ art/ balance/ + specs/ 规范模板 + README
+kanban design init        # 幂等: 生成 program/ art/ numeric/ + specs/ 规范模板 + README
 ```
 
 | 目录 | 类型 | 编号 | 规范 | 谁写 |
 |---|---|---|---|---|
-| `requirements/tech/` | 技术需求 | REQ-T-NNN | `specs/tech.md` | 主会话 Agent(引导提问) |
+| `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md` | 主会话 Agent(引导提问) |
 | `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) | 主会话 Agent |
-| `requirements/balance/` | 数值需求 | REQ-B-NNN | `specs/balance.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
+| `requirements/numeric/` | 数值需求 | REQ-N-NNN | `specs/numeric.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
 | `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | — | Agent |
 | `docs/architecture.md` | 技术方案: 选型/模块/边界/数据流 | — | 主会话切 plan 模型(强思考); 可 subagent 复核 |
 
 **建需求文件**(每需求一个文件,编号自动递增,状态默认「待评审」):
 
 ```bash
-kanban design new --type tech --module login --title "登录接口限流" --pri P1
+kanban design new --type program --module login --title "登录接口限流" --pri P1
 kanban design new --type art --module login --title "登录页视觉改版" --pri P0
-kanban design new --type balance --module login --title "失败锁定阈值平衡" --pri P2
+kanban design new --type numeric --module login --title "失败锁定阈值平衡" --pri P2
 ```
 
 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
@@ -136,7 +136,7 @@ kanban design new --type balance --module login --title "失败锁定阈值平�
 
 ```bash
 kanban design list                    # 全部, 含 → 看板 xxx [state]
-kanban design list --type tech        # 只列技术需求
+kanban design list --type program     # 只列程序需求
 kanban req-status requirements        # 等价核对 (也可指旧式单文档)
 ```
 
@@ -144,7 +144,7 @@ kanban req-status requirements        # 等价核对 (也可指旧式单文档)
 需求描述→任务目标, 验收标准→验收条件, 范围→不在本轮范围, 类型/模块→卡片头部;已建卡的 REQ 拒绝防重复):
 
 ```bash
-kanban new --spec-file requirements --req REQ-T-001 feature rate-limit 登录接口限流 --review light
+kanban new --spec-file requirements --req REQ-P-001 feature rate-limit 登录接口限流 --review light
 ```
 
 在 TUI 里输入(可直接粘贴):

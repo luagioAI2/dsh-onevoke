@@ -42,9 +42,9 @@ PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填", "填�
 
 USAGE = """用法:
   kanban init [path] [--agents]           幂等创建看板和 6 个状态目录; --agents 另给项目 AGENTS.md 写 opt-in 入口
-  kanban design init                      初始化需求仓库 requirements/ (tech|art|balance + specs 规范)
-  kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]
-                                           新建需求文件 (自动编号 REQ-T/A/B-NNN)
+  kanban design init                      初始化需求仓库 requirements/ (program|art|numeric + specs 规范)
+  kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0|P1|P2|P3]
+                                           新建需求文件 (自动编号 REQ-P/A/N-NNN)
   kanban design list [--type t] [--module m] [--status s]   列出需求仓库 (含看板映射)
   kanban design show <REQ-ID|文件路径>    查看需求文件
   kanban list [state] [--mobile] [--type t] [--module m]  列出卡片 (默认全部状态; 大任务标 [large])
@@ -415,7 +415,7 @@ BOARD_MEMORY_TEMPLATE = """# 本看板跨任务记忆 (kanban/MEMORY.md)
 
 
 # ---- 需求仓库 (design 阶段) 模板: requirements/ ----
-# 目录: tech/ (技术需求 REQ-T-NNN) | art/ (美术需求 REQ-A-NNN) | balance/ (数值需求 REQ-B-NNN)
+# 目录: program/ (程序需求 REQ-P-NNN) | art/ (美术需求 REQ-A-NNN) | numeric/ (数值需求 REQ-N-NNN)
 # 每需求一个文件; 头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求
 
 REQ_COMMON_FIELDS = """- 类型: {rtype}
@@ -426,7 +426,7 @@ REQ_COMMON_FIELDS = """- 类型: {rtype}
 - 关联需求: N/A
 """
 
-REQ_TEMPLATE_TECH = """# REQ-T-{num:03d} {title}
+REQ_TEMPLATE_PROGRAM = """# REQ-P-{num:03d} {title}
 
 {common}
 ## 需求描述
@@ -439,9 +439,9 @@ REQ_TEMPLATE_TECH = """# REQ-T-{num:03d} {title}
 
 ## 技术约束
 
-- 架构: <引用 requirements/specs/tech.md 或 docs/architecture.md 相关章节>
+- 架构: <引用 requirements/specs/program.md 或 docs/architecture.md 相关章节>
 - 接口契约: <请求/响应/错误码; 无接口则 N/A>
-- 技术栈/依赖限制: <按 specs/tech.md 约定>
+- 技术栈/依赖限制: <按 specs/program.md 约定>
 
 ## 不在本轮范围
 
@@ -474,7 +474,7 @@ REQ_TEMPLATE_ART = """# REQ-A-{num:03d} {title}
 - <明确不做的部分, 防范围蔓延>
 """
 
-REQ_TEMPLATE_BALANCE = """# REQ-B-{num:03d} {title}
+REQ_TEMPLATE_NUMERIC = """# REQ-N-{num:03d} {title}
 
 {common}
 ## 需求描述
@@ -485,7 +485,7 @@ REQ_TEMPLATE_BALANCE = """# REQ-B-{num:03d} {title}
 
 - [ ] <逐条可验证: 数值表项齐全、公式正确、边界不越界>
 
-## 数值规范 (按 requirements/specs/balance.md)
+## 数值规范 (按 requirements/specs/numeric.md)
 
 - 数值表: <表名/字段/取值范围, 或指向配置文件的路径>
 - 公式/规则: <关键公式与参数>
@@ -497,14 +497,14 @@ REQ_TEMPLATE_BALANCE = """# REQ-B-{num:03d} {title}
 - <明确不做的部分, 防范围蔓延>
 """
 
-REQ_SPEC_TECH = """# 技术需求规范 (requirements/specs/tech.md)
+REQ_SPEC_PROGRAM = """# 程序需求规范 (requirements/specs/program.md)
 
-技术团队的需求统一走需求仓库: requirements/tech/REQ-T-NNN.md, 评审拍板后由
-`kanban new --spec-file requirements/ --req REQ-T-NNN` 转看板执行。
+程序团队的需求统一走需求仓库: requirements/program/REQ-P-NNN.md, 评审拍板后由
+`kanban new --spec-file requirements/ --req REQ-P-NNN` 转看板执行。
 
 ## 需求文件要求
 
-- 每需求一个文件, 编号自动递增 (kanban design new --type tech);
+- 每需求一个文件, 编号自动递增 (kanban design new --type program);
 - 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;
 - 必含章节: 需求描述 / 验收标准 / 技术约束 / 不在本轮范围。
 
@@ -523,7 +523,7 @@ REQ_SPEC_TECH = """# 技术需求规范 (requirements/specs/tech.md)
 
 ## 转看板
 
-- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-T-NNN <feature|bug|chore|research> <slug> <标题>`
+- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-P-NNN <feature|bug|chore|research> <slug> <标题>`
 - 需求模块/类型/来源自动写入卡片, 验收条件带入需求验收标准。
 """
 
@@ -558,19 +558,19 @@ REQ_SPEC_ART = """# 美术需求规范 (requirements/specs/art.md)
 - 美术产出验收 (L0-L2) 在任务卡内完成, 浏览器/实际效果截图用 kanban verify-ui。
 """
 
-REQ_SPEC_BALANCE = """# 数值需求规范 (requirements/specs/balance.md)
+REQ_SPEC_NUMERIC = """# 数值需求规范 (requirements/specs/numeric.md)
 
-数值团队的需求统一走需求仓库: requirements/balance/REQ-B-NNN.md, 评审拍板后由
-`kanban new --spec-file requirements/ --req REQ-B-NNN` 转看板执行。
+数值团队的需求统一走需求仓库: requirements/numeric/REQ-N-NNN.md, 评审拍板后由
+`kanban new --spec-file requirements/ --req REQ-N-NNN` 转看板执行。
 
 ## 需求文件要求
 
-- 每需求一个文件, 编号自动递增 (kanban design new --type balance);
+- 每需求一个文件, 编号自动递增 (kanban design new --type numeric);
 - 必含章节: 需求描述 / 验收标准 / 数值规范 (数值表+公式+平衡目标+调参记录)。
 
 ## 数值表
 
-- 数值集中维护在配置文件/表格 (如 config/balance/ 下), 需求文件引用表名与字段, 不内嵌全表;
+- 数值集中维护在配置文件/表格 (如 config/numeric/ 或 config/balance/ 下), 需求文件引用表名与字段, 不内嵌全表;
 - 表格字段: 字段名/类型/取值范围/默认值/说明;
 - 配置热更与校验: 数值改动走配置发布, 禁止硬编码在代码里。
 
@@ -581,7 +581,7 @@ REQ_SPEC_BALANCE = """# 数值需求规范 (requirements/specs/balance.md)
 
 ## 转看板
 
-- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-B-NNN <feature|bug|chore|research> <slug> <标题>`
+- 状态改为「已拍板」后, `kanban new --spec-file requirements/ --req REQ-N-NNN <feature|bug|chore|research> <slug> <标题>`
 """
 
 REQ_README = """# 需求仓库 (requirements/)
@@ -591,16 +591,16 @@ design 阶段产出: 把项目/多模块/多游戏的需求按团队类型分目
 
 | 目录 | 类型 | 编号 | 规范文档 |
 |------|------|------|----------|
-| requirements/tech/ | 技术需求 | REQ-T-NNN | specs/tech.md |
+| requirements/program/ | 程序需求 | REQ-P-NNN | specs/program.md |
 | requirements/art/ | 美术需求 | REQ-A-NNN | specs/art.md |
-| requirements/balance/ | 数值需求 | REQ-B-NNN | specs/balance.md |
+| requirements/numeric/ | 数值需求 | REQ-N-NNN | specs/numeric.md |
 
 ## 常用命令
 
-- 建需求: `kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]`
+- 建需求: `kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0|P1|P2|P3]`
 - 列表 (含看板映射): `kanban design list [--type t] [--module m] [--status s]`
-- 查看: `kanban design show REQ-T-001`
-- 转看板: 状态改为「已拍板」后 `kanban new --spec-file requirements/ --req REQ-T-001 <kind> <slug> <标题>`
+- 查看: `kanban design show REQ-P-001`
+- 转看板: 状态改为「已拍板」后 `kanban new --spec-file requirements/ --req REQ-P-001 <kind> <slug> <标题>`
 
 ## 状态流转
 
@@ -657,35 +657,66 @@ def cmd_design(args) -> int:
 
 
 def _design_init(args) -> int:
-    """kanban design init — 幂等创建需求仓库骨架 + 规范文档."""
+    """kanban design init — 幂等创建需求仓库骨架 + 规范文档.
+    旧版目录 tech/、balance/ 与编号 REQ-T/B 自动迁移为 program/、numeric/ 与 REQ-P/N
+    (仅当目录为空或文件可安全改名时; 有旧编号需求文件时提示手动处理)."""
     if args:
         raise KanbanError("kanban design init 不带参数")
     req_root = _req_root()
-    (req_root / "tech").mkdir(parents=True, exist_ok=True)
+    # 迁移旧版命名 (tech→program, balance→numeric; 目录与 specs)
+    _migrate_legacy_names(req_root)
+    (req_root / "program").mkdir(parents=True, exist_ok=True)
     (req_root / "art").mkdir(parents=True, exist_ok=True)
-    (req_root / "balance").mkdir(parents=True, exist_ok=True)
+    (req_root / "numeric").mkdir(parents=True, exist_ok=True)
     specs = req_root / "specs"
     specs.mkdir(parents=True, exist_ok=True)
     created = 0
     for name, content in (("README.md", REQ_README),
-                          ("specs/tech.md", REQ_SPEC_TECH),
+                          ("specs/program.md", REQ_SPEC_PROGRAM),
                           ("specs/art.md", REQ_SPEC_ART),
-                          ("specs/balance.md", REQ_SPEC_BALANCE)):
+                          ("specs/numeric.md", REQ_SPEC_NUMERIC)):
         p = req_root / name
         if not p.exists():
             p.write_text(content, encoding="utf-8")
             created += 1
-    print(f"需求仓库: {req_root} (tech|art|balance 各一目录, 已建)")
+    print(f"需求仓库: {req_root} (program|art|numeric 各一目录, 已建)")
     if created:
-        print(f"已生成规范文档: {created} 份 (README.md, specs/tech.md, specs/art.md, specs/balance.md)")
+        print(f"已生成规范文档: {created} 份 (README.md, specs/program.md, specs/art.md, specs/numeric.md)")
     else:
         print("规范文档已存在, 跳过 (幂等)")
-    print("建需求: kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]")
+    print("建需求: kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0|P1|P2|P3]")
     return 0
 
 
+def _migrate_legacy_names(req_root: Path) -> None:
+    """旧版 tech/balance 命名 → program/numeric (仅迁移骨架与 specs 文件;
+    旧编号 REQ-T/B 需求文件不自动改, 提示人工处理)."""
+    legacy_dirs = (("tech", "program"), ("balance", "numeric"))
+    for old, new in legacy_dirs:
+        old_dir = req_root / old
+        new_dir = req_root / new
+        if old_dir.is_dir() and not new_dir.exists():
+            legacy_files = list(old_dir.glob("REQ-*.md"))
+            if legacy_files:
+                print(f"提示: 旧目录 {old_dir} 含旧编号需求文件 {len(legacy_files)} 个, 未自动迁移; "
+                      f"请手动改名为 {new_dir} 下并更新编号 (REQ-{old[0].upper()}→REQ-{new[0].upper()})")
+            else:
+                old_dir.rename(new_dir)
+                print(f"已迁移目录: {old_dir} → {new_dir}")
+        elif old_dir.is_dir() and new_dir.exists():
+            print(f"提示: {old_dir} 与 {new_dir} 并存; 请手动合并后删除 {old_dir}")
+    for old, new in (("tech.md", "program.md"), ("balance.md", "numeric.md")):
+        old_f = req_root / "specs" / old
+        new_f = req_root / "specs" / new
+        if old_f.is_file() and not new_f.exists():
+            old_f.rename(new_f)
+            print(f"已迁移规范: {old_f} → {new_f}")
+        elif old_f.is_file() and new_f.exists():
+            print(f"提示: {old_f} 与 {new_f} 并存; 请手动合并后删除 {old_f}")
+
+
 def _design_new(args) -> int:
-    """kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0|P1|P2|P3]
+    """kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0|P1|P2|P3]
     新建需求文件, 编号自动递增; 状态默认「待评审」."""
     rtype = None
     module = None
@@ -698,7 +729,7 @@ def _design_new(args) -> int:
         if a == "--type":
             i += 1
             if i >= len(args):
-                raise KanbanError("--type 需要 tech|art|balance")
+                raise KanbanError("--type 需要 program|art|numeric")
             rtype = args[i]
         elif a == "--module":
             i += 1
@@ -719,7 +750,7 @@ def _design_new(args) -> int:
             raise KanbanError(f"未知选项: {a}")
         i += 1
     if rtype not in REQ_TYPES:
-        raise KanbanError(f"--type 必须是 {'/'.join(REQ_TYPES)} (tech 技术|art 美术|balance 数值)")
+        raise KanbanError(f"--type 必须是 {'/'.join(REQ_TYPES)} (program 程序|art 美术|numeric 数值)")
     if not module:
         raise KanbanError("--module 必填 (模块/游戏名)")
     if not title:
@@ -727,14 +758,14 @@ def _design_new(args) -> int:
     if pri not in ("P0", "P1", "P2", "P3"):
         raise KanbanError("--pri 只能是 P0|P1|P2|P3")
     req_root = _req_root()
-    if not (req_root / "specs" / "tech.md").exists():
+    if not (req_root / "specs" / "program.md").exists():
         raise KanbanError(f"需求仓库未初始化: {req_root} (先 kanban design init)")
     req_dir = req_root / REQ_TYPE_DIRS[rtype]
     req_dir.mkdir(parents=True, exist_ok=True)
     num = _req_next_num(req_dir, rtype)
     rid = f"REQ-{rtype[0].upper()}-{num:03d}"
     common = REQ_COMMON_FIELDS.format(rtype=rtype, module=module, pri=pri)
-    tmpl = {"tech": REQ_TEMPLATE_TECH, "art": REQ_TEMPLATE_ART, "balance": REQ_TEMPLATE_BALANCE}[rtype]
+    tmpl = {"program": REQ_TEMPLATE_PROGRAM, "art": REQ_TEMPLATE_ART, "numeric": REQ_TEMPLATE_NUMERIC}[rtype]
     text = tmpl.format(num=num, title=title, common=common)
     f = req_dir / f"{rid}.md"
     f.write_text(text, encoding="utf-8")
@@ -757,7 +788,7 @@ def _design_list(args) -> int:
         if a == "--type":
             i += 1
             if i >= len(args):
-                raise KanbanError("--type 需要 tech|art|balance")
+                raise KanbanError("--type 需要 program|art|numeric")
             rtype = args[i]
             if rtype not in REQ_TYPES:
                 raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
@@ -784,10 +815,10 @@ def _design_list(args) -> int:
         print(f"需求仓库为空: {req_root} (kanban design new 建需求)")
         return 0
     root = board_root()
-    # 排序: 类型 (tech<art<balance) → 编号 → 状态流转
+    # 排序: 类型 (program<art<numeric) → 编号 → 状态流转
     def sort_key(kv):
         rid, info = kv
-        m = re.match(r"^REQ-([TAB])-(\d{3})$", rid)
+        m = re.match(r"^REQ-([PAN])-(\d{3})$", rid)
         t = m.group(1) if m else "Z"
         n = int(m.group(2)) if m else 0
         f = info["fields"]
@@ -818,7 +849,7 @@ def _design_show(args) -> int:
     target = args[0]
     req_root = _req_root()
     if REQ_ID_RE.match(target):
-        m = re.match(r"^REQ-([TAB])-(\d{3})$", target)
+        m = re.match(r"^REQ-([PAN])-(\d{3})$", target)
         rtype = REQ_LETTER_TO_TYPE[m.group(1)]
         f = req_root / REQ_TYPE_DIRS[rtype] / f"{target}.md"
         if not f.is_file():
@@ -843,7 +874,7 @@ def cmd_list(args) -> int:
         if a == "--type":
             i += 1
             if i >= len(args):
-                raise KanbanError("--type 需要 tech|art|balance")
+                raise KanbanError("--type 需要 program|art|numeric")
             rtype = args[i]
             if rtype not in REQ_TYPES:
                 raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
@@ -904,21 +935,21 @@ def cmd_show(args) -> int:
     return 0
 
 
-# REQ 编号: 旧式全局 REQ-004, 新式分类型 REQ-T-001 (技术) / REQ-A-001 (美术) / REQ-B-001 (数值)
-REQ_HEAD_RE = re.compile(r"^#{1,2}\s+(REQ-(?:[TAB]-)?\d+)\s+(.+)$", re.M)
-REQ_ID_RE = re.compile(r"^REQ-(?:[TAB]-)?\d+$")
-REQ_TYPES = ("tech", "art", "balance")
-REQ_TYPE_LABELS = {"tech": "技术", "art": "美术", "balance": "数值"}
-REQ_TYPE_DIRS = {"tech": "tech", "art": "art", "balance": "balance"}
-REQ_LETTER_TO_TYPE = {"T": "tech", "A": "art", "B": "balance"}
+# REQ 编号: 旧式全局 REQ-004, 新式分类型 REQ-P-001 (程序) / REQ-A-001 (美术) / REQ-N-001 (数值)
+REQ_HEAD_RE = re.compile(r"^#{1,2}\s+(REQ-(?:[PAN]-)?\d+)\s+(.+)$", re.M)
+REQ_ID_RE = re.compile(r"^REQ-(?:[PAN]-)?\d+$")
+REQ_TYPES = ("program", "art", "numeric")
+REQ_TYPE_LABELS = {"program": "程序", "art": "美术", "numeric": "数值"}
+REQ_TYPE_DIRS = {"program": "program", "art": "art", "numeric": "numeric"}
+REQ_LETTER_TO_TYPE = {"P": "program", "A": "art", "N": "numeric"}
 
 
 def _parse_reqs(path: Path):
     """解析需求文档/需求仓库 -> {REQ-ID: {title, fields, path}}.
     兼容两种形态:
       - 旧式单文档多条目: `## REQ-004 标题` 起, 到下个 `## ` 为止; 块内 `- 键: 值` 进 fields
-      - 新式需求仓库 requirements/: 按类型分目录 (tech|art|balance), 每需求一个文件
-        `# REQ-T-001 标题` 起; 头部 `- 键: 值` 进 fields (键: 类型/模块/优先级/状态/
+      - 新式需求仓库 requirements/: 按类型分目录 (program|art|numeric), 每需求一个文件
+        `# REQ-P-001 标题` 起; 头部 `- 键: 值` 进 fields (键: 类型/模块/优先级/状态/
         动机/期望/验收/威胁/范围/关联需求); 章节「需求描述」首段进 期望,
         「验收标准」下 `- ` 行进 验收 (多条以换行拼接).
     path 可以是单个文件或目录; 目录递归收集各类型 REQ-*.md."""
@@ -994,7 +1025,7 @@ def _priority_key(info) -> tuple:
 
 
 def cmd_req_status(args) -> int:
-    """kanban req-status [需求文档|需求仓库] [--type tech|art|balance] [--module <名>]
+    """kanban req-status [需求文档|需求仓库] [--type program|art|numeric] [--module <名>]
     — 核对需求条目与看板卡状态 (按优先级排序).
     默认扫描项目根 requirements/ 需求仓库; 无仓库时回退 docs/requirements.md."""
     rtype = None
@@ -1006,7 +1037,7 @@ def cmd_req_status(args) -> int:
         if a == "--type":
             i += 1
             if i >= len(args):
-                raise KanbanError("--type 需要 tech|art|balance")
+                raise KanbanError("--type 需要 program|art|numeric")
             rtype = args[i]
             if rtype not in REQ_TYPES:
                 raise KanbanError(f"--type 只能是 {'/'.join(REQ_TYPES)}")
@@ -1029,9 +1060,9 @@ def cmd_req_status(args) -> int:
     reqs = _parse_reqs(doc)
     if not reqs:
         if doc.is_dir():
-            print(f"{doc}: 需求仓库为空 (kanban design new --type tech|art|balance 建需求)")
+            print(f"{doc}: 需求仓库为空 (kanban design new --type program|art|numeric 建需求)")
         else:
-            print(f"{doc}: 未找到 REQ 条目 (格式: ## REQ-004 标题 或 需求仓库 REQ-T/A/B-NNN 文件)")
+            print(f"{doc}: 未找到 REQ 条目 (格式: ## REQ-004 标题 或 需求仓库 REQ-P/A/N-NNN 文件)")
         return 0
     root = board_root()
     shown = 0

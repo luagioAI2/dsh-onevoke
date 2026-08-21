@@ -47,18 +47,18 @@ dsh --profile tui --dump-config
 整体分两段:**design(需求仓库)** 产出按团队类型归档的需求,评审拍板后**kanban** 转卡执行:
 
 ```text
-头脑风暴 → requirements/ 需求仓库 (tech 技术 / art 美术 / balance 数值, 每需求一个文件)
+头脑风暴 → requirements/ 需求仓库 (program 程序 / art 美术 / numeric 数值, 每需求一个文件)
         → 评审拍板 (状态: 待评审 → 已拍板)
-        → kanban new --spec-file requirements --req REQ-T-001 转看板 → 执行 → done
+        → kanban new --spec-file requirements --req REQ-P-001 转看板 → 执行 → done
 ```
 
-- `kanban design init` — 幂等生成 `requirements/`(tech|art|balance 目录 + specs 规范模板 + README);
-- `kanban design new --type tech|art|balance --module <模块> --title <标题> [--pri P0-P3]`
-  — 建需求文件,编号自动递增(REQ-T-NNN / REQ-A-NNN / REQ-B-NNN),状态默认「待评审」;
-- `kanban design list [--type t] [--module m] [--status s]` / `kanban design show REQ-T-001`
+- `kanban design init` — 幂等生成 `requirements/`(program|art|numeric 目录 + specs 规范模板 + README);旧版 tech/balance 命名自动迁移;
+- `kanban design new --type program|art|numeric --module <模块> --title <标题> [--pri P0-P3]`
+  — 建需求文件,编号自动递增(REQ-P-NNN / REQ-A-NNN / REQ-N-NNN),状态默认「待评审」;
+- `kanban design list [--type t] [--module m] [--status s]` / `kanban design show REQ-P-001`
   — 列表(含看板映射)与查看;
-- 各团队规范见 `requirements/specs/tech.md`(技术架构)、`art.md`(设计分辨率/产出文件夹/切图/通用UI)、
-  `balance.md`(数值表/公式/平衡目标/调参记录);多模块/多游戏按 `- 模块:` 字段归档;
+- 各团队规范见 `requirements/specs/program.md`(技术架构)、`art.md`(设计分辨率/产出文件夹/切图/通用UI)、
+  `numeric.md`(数值表/公式/平衡目标/调参记录);多模块/多游戏按 `- 模块:` 字段归档;
 - 转看板自动导入契约: 需求描述→任务目标, 验收标准→验收条件, 不在本轮范围→范围,
   类型/模块→卡片头部;已建卡的 REQ 拒绝防重复;
 - 旧式单文档 `docs/requirements.md`(`## REQ-004` 格式)仍兼容。

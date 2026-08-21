@@ -84,7 +84,7 @@
 
 ### 5.8 design 阶段:需求仓库(design → kanban)
 - 新增 `kanban design init|new|list|show` + `req-status/list` 支持 `--type/--module` 筛选。
-- 需求仓库 `requirements/`(进 git 团队共享,与 kanban/ 本地排除相对):`tech/` REQ-T-NNN、`art/` REQ-A-NNN、`balance/` REQ-B-NNN,每需求一个文件,编号按类型自动递增;`specs/` 存 3 份团队规范模板(技术架构 / 美术:设计分辨率·产出文件夹·切图·通用UI / 数值:数值表·公式·平衡目标·调参记录)。
-- 转看板 `kanban new --spec-file requirements --req REQ-T-001` 自动导入:需求描述→任务目标、验收标准→验收条件、不在本轮范围→范围、类型/模块→卡片头部(`- 需求类型:` / `- 模块:`);已建卡 REQ 拒绝防重复;旧式单文档 `docs/requirements.md`(`## REQ-004`)仍兼容(正则 `REQ-(?:[TAB]-)?\d+` 双格式)。
-- 实测(login-app):init 幂等、多模块(login/combat)归档、类型独立编号(REQ-T-001/002、REQ-A-001、REQ-B-001)、筛选(list --type/--module/--status、req-status)、转卡契约全链、重复建卡拒绝、旧格式兼容。
-- 坑:占位符误判 — L3 记录正文含"填写"触发 PLACEHOLDERS 误报,文案避用占位符词;`REQ_TYPE_DIRS` 键为类型全名,`design show` 需经 `REQ_LETTER_TO_TYPE`(T/A/B→tech/art/balance)映射。
+- 需求仓库 `requirements/`(进 git 团队共享,与 kanban/ 本地排除相对):`program/` REQ-P-NNN、`art/` REQ-A-NNN、`numeric/` REQ-N-NNN(程序/美术/数值,对齐团队维度;旧版 tech/balance 命名由 design init 自动迁移),每需求一个文件,编号按类型自动递增;`specs/` 存 3 份团队规范模板(程序架构 / 美术:设计分辨率·产出文件夹·切图·通用UI / 数值:数值表·公式·平衡目标·调参记录)。
+- 转看板 `kanban new --spec-file requirements --req REQ-P-001` 自动导入:需求描述→任务目标、验收标准→验收条件、不在本轮范围→范围、类型/模块→卡片头部(`- 需求类型:` / `- 模块:`);已建卡 REQ 拒绝防重复;旧式单文档 `docs/requirements.md`(`## REQ-004`)仍兼容(正则 `REQ-(?:[PAN]-)?\d+` 双格式)。
+- 实测(login-app):init 幂等、多模块(login/combat)归档、类型独立编号(REQ-P-001、REQ-A-001、REQ-N-001)、筛选(list --type/--module/--status、req-status)、转卡契约全链、重复建卡拒绝、旧格式兼容、旧命名迁移。
+- 坑:占位符误判 — L3 记录正文含"填写"触发 PLACEHOLDERS 误报,文案避用占位符词;`REQ_TYPE_DIRS` 键为类型全名,`design show` 需经 `REQ_LETTER_TO_TYPE`(P/A/N→program/art/numeric)映射。
