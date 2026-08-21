@@ -118,9 +118,8 @@ kanban design init        # 幂等: 生成 program/ art/ numeric/ + specs/ 规�
 | `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md`(含**技术架构**: 选型/模块/边界/数据流) | 主会话 Agent(引导提问); 架构切 plan 模型(强思考), 可 subagent 复核 |
 | `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) | 主会话 Agent |
 | `requirements/numeric/` | 数值需求 | REQ-N-NNN | `specs/numeric.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
-| `docs/decisions.md` | 决策记录 ADR: 为什么这么选/备选/影响 | — | Agent |
 
-> 技术架构**直接维护在 `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设 `docs/architecture.md`);项目已有独立技术文档时用其位置并在 specs 里注明引用。
+> 技术架构**直接维护在 `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设独立文件);项目已有独立技术文档体系时用其位置并在 specs 里注明引用。**决策取舍写进对应需求文件「讨论与决策」章节**,稳定结论进 `kanban/MEMORY.md`,不单独维护 ADR 文档。
 
 **建需求文件**(每需求一个文件,编号自动递增,状态默认「待评审」):
 
@@ -131,7 +130,7 @@ kanban design new --type numeric --module login --title "失败锁定阈值平�
 ```
 
 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
-(技术约束|产出规范|数值规范)/不在本轮范围。旧式单文档 `docs/requirements.md`(`## REQ-004`)仍兼容。
+(技术约束|产出规范|数值规范)/不在本轮范围/讨论与决策。旧式单文档(`## REQ-004`)仍兼容。
 
 **多轮头脑风暴 = 追加新需求文件**(不覆盖旧的)。核对与去重(按优先级排序,含看板映射):
 

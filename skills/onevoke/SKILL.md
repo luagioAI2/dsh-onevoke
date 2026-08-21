@@ -144,12 +144,13 @@ requirements/
 - **建需求文件**(每需求一个文件,编号自动递增):
   ```bash
   kanban design new --type program --module login --title "登录接口限流" --pri P1
-  # art/numeric 同理; 单文档旧式格式 (docs/requirements.md, ## REQ-004) 仍兼容
+  # art/numeric 同理; 单文档旧式格式 (## REQ-004) 仍兼容
   ```
   文件头部字段统一: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
   (技术约束|产出规范|数值规范)/不在本轮范围。**技术架构(选型/模块/边界/数据流)直接维护在
-  `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设 docs/architecture.md);
-  决策取舍写 `docs/decisions.md`(ADR: 为什么这么选/备选/影响);稳定结论顺手进 `kanban/MEMORY.md`。
+  `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设独立文件);
+  **决策取舍直接写进对应需求文件「讨论与决策」**(为什么这么选/备选/影响),稳定结论顺手进
+  `kanban/MEMORY.md`;不单独维护 ADR 文档。
 - **评审拍板**: 需求文件头部 `- 状态:` 由「待评审」改「已拍板」(评审通过后)。
 - **团队取需求转看板**(design → kanban 衔接点;该 REQ 已在看板任意状态则拒绝,防重复):
   ```bash
@@ -230,7 +231,7 @@ requirements/
 - **L3 浏览器 E2E**(独立阶段,不在卡验收内): 任务完成、代码合并后,执行 `kanban e2e <task-id>`:
   1. 启动应用并确认端口可访问;
   2. 走关键流程(登录/验证码/主要交互);
-  3. 截图存 `docs/screenshots/<task-id>/`(命名 01-xxx.png 起);
+  3. 截图存 `screenshots/<task-id>/`(命名 01-xxx.png 起);
   4. 在卡片「实施与验证」追加: 验证流程/截图路径/结论。
   - **截图优先用 DSH 自带 `browser` 工具**(dsh-browser-playwright 插件): `browser_screenshot <url> <path>` 等 `browser_*` 工具,无浏览器时才退回 Playwright 脚本或真实浏览器手动验证;
   - 禁把"未验证"写成通过。

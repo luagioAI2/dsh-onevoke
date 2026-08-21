@@ -447,6 +447,10 @@ REQ_TEMPLATE_PROGRAM = """# REQ-P-{num:03d} {title}
 ## 不在本轮范围
 
 - <明确不做的部分, 防范围蔓延>
+
+## 讨论与决策
+
+<选型/取舍: 为什么这么选, 备选方案, 影响; 稳定结论进 kanban/MEMORY.md>
 """
 
 REQ_TEMPLATE_ART = """# REQ-A-{num:03d} {title}
@@ -473,6 +477,10 @@ REQ_TEMPLATE_ART = """# REQ-A-{num:03d} {title}
 ## 不在本轮范围
 
 - <明确不做的部分, 防范围蔓延>
+
+## 讨论与决策
+
+<选型/取舍: 为什么这么选, 备选方案, 影响; 稳定结论进 kanban/MEMORY.md>
 """
 
 REQ_TEMPLATE_NUMERIC = """# REQ-N-{num:03d} {title}
@@ -496,6 +504,10 @@ REQ_TEMPLATE_NUMERIC = """# REQ-N-{num:03d} {title}
 ## 不在本轮范围
 
 - <明确不做的部分, 防范围蔓延>
+
+## 讨论与决策
+
+<选型/取舍: 为什么这么选, 备选方案, 影响; 稳定结论进 kanban/MEMORY.md>
 """
 
 REQ_SPEC_PROGRAM = """# 程序需求规范 (requirements/specs/program.md)
@@ -507,11 +519,11 @@ REQ_SPEC_PROGRAM = """# 程序需求规范 (requirements/specs/program.md)
 
 - 每需求一个文件, 编号自动递增 (kanban design new --type program);
 - 头部字段: 类型/模块/优先级/状态/需求来源/关联需求;
-- 必含章节: 需求描述 / 验收标准 / 技术约束 / 不在本轮范围。
+- 必含章节: 需求描述 / 验收标准 / 技术约束 / 不在本轮范围 / 讨论与决策 (选型取舍)。
 
 ## 技术架构(本文件即程序团队的技术架构文档)
 
-架构不另设 docs/architecture.md,直接维护在本文件「技术架构」章节,程序团队的需求与架构一体:
+架构直接维护在本文件「技术架构」章节, 程序团队的需求与架构一体, 不另设独立文件:
 
 - **选型**: 技术栈/语言/框架/数据库/中间件, 及选型理由与备选;
 - **模块**: 模块划分/职责/依赖方向 (谁依赖谁, 禁止反向);
@@ -519,7 +531,7 @@ REQ_SPEC_PROGRAM = """# 程序需求规范 (requirements/specs/program.md)
 - **数据流**: 关键链路 (请求→处理→存储→响应) 与数据模型。
 - 需求里的「技术约束-架构」引用本文件章节, 不重复全文;
 - 架构变更必须先改本文件再转看板, 禁止边做边定架构;
-- 项目已有独立技术文档 (如团队 wiki/仓库 docs/ 自管) 时, 用其位置并在本文件注明引用。
+- 项目已有独立技术文档体系 (如团队 wiki/仓库自管文档) 时, 用其位置并在本文件注明引用。
 
 ## 工程约定 (按项目实际情况维护)
 
@@ -573,7 +585,7 @@ REQ_SPEC_NUMERIC = """# 数值需求规范 (requirements/specs/numeric.md)
 ## 需求文件要求
 
 - 每需求一个文件, 编号自动递增 (kanban design new --type numeric);
-- 必含章节: 需求描述 / 验收标准 / 数值规范 (数值表+公式+平衡目标+调参记录)。
+- 必含章节: 需求描述 / 验收标准 / 数值规范 (数值表+公式+平衡目标+调参记录) / 讨论与决策 (选型取舍)。
 
 ## 数值表
 
@@ -1032,9 +1044,9 @@ def _priority_key(info) -> tuple:
 
 
 def cmd_req_status(args) -> int:
-    """kanban req-status [需求文档|需求仓库] [--type program|art|numeric] [--module <名>]
+    """kanban req-status [需求仓库|需求文档] [--type program|art|numeric] [--module <名>]
     — 核对需求条目与看板卡状态 (按优先级排序).
-    默认扫描项目根 requirements/ 需求仓库; 无仓库时回退 docs/requirements.md."""
+    默认扫描项目根 requirements/ 需求仓库; 也可显式指定单个需求文件/旧式单文档."""
     rtype = None
     module = None
     rest = []
@@ -1059,11 +1071,12 @@ def cmd_req_status(args) -> int:
     project = board_root().parent
     if rest:
         doc = Path(rest[0])
+        if not doc.exists():
+            raise KanbanError(f"需求文档不存在: {doc} (可用 kanban req-status <路径>)")
     else:
-        req_root = project / "requirements"
-        doc = req_root if req_root.is_dir() else project / "docs" / "requirements.md"
-    if not doc.exists():
-        raise KanbanError(f"需求文档不存在: {doc} (可用 kanban req-status <路径>)")
+        doc = project / "requirements"
+        if not doc.is_dir():
+            raise KanbanError(f"需求仓库不存在: {doc} (先 kanban design init)")
     reqs = _parse_reqs(doc)
     if not reqs:
         if doc.is_dir():
@@ -1103,7 +1116,7 @@ def cmd_e2e(args) -> int:
         raise KanbanError("kanban e2e 需要 <task-id>")
     root = board_root()
     state, entry = find_card(root, args[0])
-    shots = root.parent / "docs" / "screenshots" / args[0]
+    shots = root.parent / "screenshots" / args[0]
     shots.mkdir(parents=True, exist_ok=True)
     print(f"L3 浏览器 E2E: {args[0]} [{state}]")
     print(f"截图目录: {shots}")
@@ -1124,7 +1137,7 @@ def cmd_visual(args) -> int:
         raise KanbanError("kanban visual 需要 <task-id>")
     root = board_root()
     state, entry = find_card(root, args[0])
-    vdir = root.parent / "docs" / "screenshots" / args[0] / "visual"
+    vdir = root.parent / "screenshots" / args[0] / "visual"
     baseline = vdir / "baseline"
     current = vdir / "current"
     baseline.mkdir(parents=True, exist_ok=True)
