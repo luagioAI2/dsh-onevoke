@@ -250,6 +250,10 @@ N/A
 
 N/A
 
+## 红线
+
+- <禁止事项: 不可改的模块/数据/环境, 触发即停下报告; 无则 N/A>
+
 ## 不在本轮范围
 
 - <填写>
@@ -448,6 +452,10 @@ REQ_TEMPLATE_PROGRAM = """# REQ-P-{num:03d} {title}
 
 - <明确不做的部分, 防范围蔓延>
 
+## 红线
+
+- <禁止事项: 不可改的模块/数据/环境/契约; 无则 N/A>
+
 ## 讨论与决策
 
 <选型/取舍: 为什么这么选, 备选方案, 影响; 稳定结论进 kanban/MEMORY.md>
@@ -477,6 +485,10 @@ REQ_TEMPLATE_ART = """# REQ-A-{num:03d} {title}
 ## 不在本轮范围
 
 - <明确不做的部分, 防范围蔓延>
+
+## 红线
+
+- <禁止事项: 不可改的模块/数据/环境/契约; 无则 N/A>
 
 ## 讨论与决策
 
@@ -989,13 +1001,14 @@ def _parse_reqs(path: Path):
         desc_lines = []
         accept_lines = []
         scope_lines = []
+        redline_lines = []
         for line in text.splitlines():
             m = REQ_HEAD_RE.match(line)
             if m:
                 reqs[m.group(1)] = {"title": m.group(2).strip(), "fields": {}, "path": f}
                 cur = m.group(1)
                 section = None
-                desc_lines, accept_lines, scope_lines = [], [], []
+                desc_lines, accept_lines, scope_lines, redline_lines = [], [], [], []
                 continue
             if not cur:
                 continue
@@ -1019,6 +1032,10 @@ def _parse_reqs(path: Path):
                 s = line.strip()
                 if s.startswith("-"):
                     scope_lines.append(re.sub(r"^-\s*", "- ", s))
+            elif section == "红线":
+                s = line.strip()
+                if s.startswith("-"):
+                    redline_lines.append(re.sub(r"^-\s*", "- ", s))
         flds = reqs[cur]["fields"]
         if desc_lines and not flds.get("期望"):
             flds["期望"] = " ".join(desc_lines)
@@ -1026,6 +1043,8 @@ def _parse_reqs(path: Path):
             flds["验收"] = "\n".join(a for a in accept_lines if a)
         if scope_lines:
             flds["范围"] = "\n".join(scope_lines)
+        if redline_lines:
+            flds["红线"] = "\n".join(redline_lines)
     return reqs
 
 
@@ -1364,7 +1383,13 @@ def cmd_new(args) -> int:
             checks = "\n".join(f"- [ ] {a.strip()}" for a in accept.splitlines() if a.strip())
             text = text.replace("- [ ] <填写>", checks)
         text = text.replace("## 威胁模型\n\nN/A", f"## 威胁模型\n\n{threat}")
-        text = text.replace("- <填写>\n\n## 讨论与决策", f"{scope}\n\n## 讨论与决策")
+        # 范围写入「不在本轮范围」章节 (注意卡片含「红线」章节, 用章节标题定位)
+        text = text.replace("## 不在本轮范围\n\n- <填写>", f"## 不在本轮范围\n\n{scope}")
+        # 需求红线 (需求文件的「红线」章节或头部字段) → 卡片「红线」
+        req_redline = f.get("红线")
+        if req_redline:
+            text = text.replace("## 红线\n\n- <禁止事项: 不可改的模块/数据/环境, 触发即停下报告; 无则 N/A>",
+                                f"## 红线\n\n{req_redline}")
         # 需求类型/模块: 写入卡片头部 (需求仓库分类型需求; 旧式单文档无则跳过)
         req_type = f.get("类型")
         if req_type in REQ_TYPES:
