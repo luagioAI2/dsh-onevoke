@@ -25,9 +25,13 @@
 │ (工作流契约,  │ │ (Python 零   │ │ + worktree 防篡改          │
 │  按需加载)     │ │  依赖)       │ │ (子代理只读审核的门禁)      │
 └───────────────┘ └──────────────┘ └───────────────────────────┘
-        │  (按项目 opt-in: 项目根 AGENTS.md 声明走看板流程, 不写全局)  
+        │  (按项目 opt-in: 项目根 AGENTS.md 声明走看板流程, 不写全局)
         ▼
 ┌──────────────────────────────────────────────────────────────────┐
+│ 流程两段: design(需求仓库) → kanban(看板执行)                     │
+│   requirements/  program|art|numeric + specs 规范 (进 git)        │
+│   kanban/        看板 (不进 git, 本地)                            │
+│   screenshots/   L3/L4 验证截图 (进 git)                          │
 │ 任务执行 = 独立 DSH 会话  kb-<task-id>                            │
 │   kanban start → tmux window kb-<slug> → dsh --profile tui        │
 │   --resume kb-<task-id> → 注入任务 prompt                         │
@@ -40,8 +44,8 @@
 | 部件 | 承载什么 | 为什么这么放 |
 |---|---|---|
 | `cordis.patch.yml` | profile 接线(极薄) | DSH 插件 = 配置覆盖层;契约不放配置,升级不碎 |
-| `skills/onevoke/SKILL.md` | **流程契约**:看板/多会话/worktree/审核/报告 | DSH 技能按需加载,不常驻占上下文;格式与 `~/.agents/skills/` 一致 |
-| `bin/kanban` | 机械状态机:new/pick/start/move/check | 文件即状态,CLI 保证不变量(Onevoke 同哲学) |
+| `skills/onevoke/SKILL.md` | **流程契约**:design/看板/多会话/worktree/审核/报告/前端 L0-L5 | DSH 技能按需加载,不常驻占上下文;格式与 `~/.agents/skills/` 一致 |
+| `bin/kanban` | 机械状态机:design/init/new/pick/start/move/check/e2e/visual | 文件即状态,CLI 保证不变量(Onevoke 同哲学) |
 | `bin/onevoke-review` | 审核证据 + Git 门禁 + 防篡改 | 审核的机械部分;角色判断交给 DSH subagent |
 | `项目 AGENTS.md` | 按项目 opt-in 入口(可选) | 用 dsh-onevoke 的项目自己声明;不写全局,不污染其他项目 |
 
@@ -54,6 +58,28 @@
 | 协调 Agent 巡检任务组 | 并行任务 = 多个会话;同一会话内长任务用 goal |
 | welcome/doctor/config 向导 | profile 配置(`cordis.patch.yml` / `~/.dsh/cordis.patch.yml`) |
 | ~/.agents 规则文件 | 技能 + 项目 AGENTS.md(可选 opt-in 入口) |
+
+**design 阶段(需求仓库)设计动机**:
+
+- 多模块/多游戏项目里,单文档平铺需求(旧 `docs/requirements.md`)肉眼难找对应模块;
+- 传统做法是产出**总需求仓库**分团队归档(技术/数值/美术需求各一个文件池),各团队取走
+  属于自己的需求再走看板。dsh-onevoke 复刻此形态: `requirements/` 按团队类型分目录
+  (`program/` 程序 / `art/` 美术 / `numeric/` 数值),每需求一个文件,编号分类型递增
+  (REQ-P-NNN / REQ-A-NNN / REQ-N-NNN);
+- 每类配规范文档 `specs/*.md`: 程序含**技术架构**(选型/模块/边界/数据流,需求与架构一体,
+  不另设独立架构文件);美术含设计分辨率/产出文件夹/切图/通用 UI;数值含数值表/公式/平衡目标/调参记录;
+- 决策取舍写进需求文件「讨论与决策」,稳定结论进 `kanban/MEMORY.md`(不单独维护 ADR 文档);
+- 评审拍板(状态 → 已拍板)后 `kanban new --spec-file requirements --req REQ-P-001` 转看板,
+  自动导入契约(描述→目标、验收→验收条件、范围、类型/模块→卡片头部),已建卡 REQ 拒绝防重复;
+- 旧式单文档(`## REQ-004`)作为输入仍兼容。
+
+**前端验证 L0-L5 设计动机**:
+
+- 按由轻到重分层,避免"前端验证"含糊成一层: L0 静态 / L1 JS 逻辑 / L2 接口 在卡内由 Agent 完成;
+  L3 浏览器 E2E(`kanban e2e`,独立阶段)、L4 视觉回归(`kanban visual`,基线截图 diff)独立执行;
+  L5 视觉还原(对照设计稿)**必须人/视觉模型判定**,Agent 只提供截图与差异说明,禁替用户判定"像不像";
+- L3/L4 截图存项目根 `screenshots/<task-id>/`(不进 docs/,流程产物全部顶层平级:
+  requirements/ kanban/ screenshots/)。
 
 ---
 
@@ -76,19 +102,30 @@ Agent(本会话):
 Agent: 集成 → move done → 发 8 字段完成报告
 ```
 
+**design 阶段(需求仓库,多模块/多游戏项目;单需求也可直接走上面流程)**:
+
+```
+你: 多模块需求讨论(可能跨多天) → Agent 引导提问收敛
+Agent: kanban design init → kanban design new --type program|art|numeric --module <模块> --title <标题>
+       → 填需求描述/验收标准 → 评审拍板 (状态 → 已拍板)
+       → kanban new --spec-file requirements --req REQ-P-001 <kind> <slug> <标题> 转看板
+       → 之后的 pick/start/审核/验收/集成与单需求流程一致
+```
+
 **Agent 在任务会话里的执行流程**:
 
 ```
 1. 加载 onevoke 技能 → kanban show <id> 读卡 → 读项目 AGENTS.md/规则
-2. git worktree add 任务分支 (基于最新 origin/develop)
-3. 实现 → 本地验证 → 按关注点提交 → push 任务分支
-4. 审核 (onevoke-review 收集证据 + 门禁校验):
+2. (若有) 读 requirements/specs/program.md「技术架构」, 实现遵循其设计
+3. git worktree add 任务分支 (基于最新 origin/develop)
+4. 实现 → 本地验证 → 按关注点提交 → push 任务分支
+5. 审核 (onevoke-review 收集证据 + 门禁校验):
        subagent PM ──→ (CSA/Hacker 按触发条件) ──→ subagent QA
        必修档 finding 由主 Agent 逐条核实 → 修复只重跑当前阶段
-5. 向用户请求验收 → 确认
-6. 集成: rebase develop → 验证 → push → 主树 ff-only merge → 清理 worktree/分支
-7. 填 结果: completed + 完成总结 → kanban move done → kanban check
-8. 发「看板任务完成报告」(8 字段模板)
+6. 向用户请求验收 → 确认
+7. 集成: rebase develop → 验证 → push → 主树 ff-only merge → 清理 worktree/分支
+8. 填 结果: completed + 完成总结 → kanban move done → kanban check
+9. 发「看板任务完成报告」(8 字段模板)
 ```
 
 **状态机**(与 Onevoke 相同):
@@ -173,7 +210,12 @@ per-role reviewer 配置(`~/.dsh/onevoke/reviewers.yml`)、**稳定会话 id**
 (`create-session.mjs` 按官方 JSONL+zstd 格式预建,`kb-<task-id>` 可 `--resume` 恢复)、
 **项目级执行模型**(项目根 `.dsh-onevoke.yml` → `kanban start` 自动 `/model` 切换;含 `plan`/`review`/`reviewers` 分段,解析优先级: 会话 `/model` > 项目 `reviewers.<角色>` > 项目 `review` > home `reviewers.yml` > 会话默认)、**看板 Web 视图**
 (`kanban web` 状态服务: HTML 页面 + `/api/board` + `/api/card/<id>`)、
-QuickTUI 可见的 tmux 任务窗口(prompt 就绪轮询注入)。
+QuickTUI 可见的 tmux 任务窗口(prompt 就绪轮询注入)、
+**design 阶段需求仓库**(`kanban design init|new|list|show`;program/art/numeric 分类型编号
+REQ-P/A/N-NNN;specs 规范含技术架构/美术产出/数值规范;`kanban new --spec-file requirements`
+自动导入契约;`list`/`req-status` 支持 `--type/--module` 筛选;旧式单文档兼容)、
+**前端验证 L0-L5**(L0-L2 卡内;`kanban e2e` L3 浏览器 E2E;`kanban visual` L4 基线截图 diff,
+自动检测 ImageMagick compare → python3+PIL → 哈希兜底;L5 视觉还原须人/视觉模型判定)。
 
 **已知限制**
 - TUI 需真 TTY:执行走 WSL 原生 dsh;Windows node 版仅 headless(审核可用)。

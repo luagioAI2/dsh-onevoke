@@ -75,6 +75,8 @@ kanban start [--no-window] [--ignore-deps] [task-id]
 kanban move <task-id> <state>          按状态机迁移
 kanban group <group-id>                任务组依赖状态 (成员/前置/就绪)
 kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
+kanban e2e <task-id>                   L3 浏览器 E2E (独立阶段, 建 screenshots/<task-id>/ + 指引)
+kanban visual <task-id>                L4 视觉回归 (基线截图 diff: compare/PIL/哈希自动检测)
 kanban upgrade <task-id>               小任务 → 大任务 (仅 backlog/working)
 kanban check                           列出全部无效入口, 有则非零退出
 ```

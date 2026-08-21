@@ -1,8 +1,10 @@
 # dsh-onevoke 实测手册:从一台刚装好 dsh 的机器开始
 
-目标: 用 **golang 登录后端 + 前端演示页** 走一遍完整 Onevoke 流程
-(需求 → 看板卡 → 独立会话 → worktree 提交 → PM/QA 审核 → 验收 → 集成 → done)。
+目标: 用 **golang 登录后端 + 前端演示页** 走一遍完整流程
+(需求 → 看板卡 → 独立会话 → worktree 提交 → 审核 → 验收 → 集成 → done)。
 以下命令按顺序整段复制执行即可(WSL Ubuntu 环境;`#` 后是说明)。
+
+> 只想快速上手: 先看 [`README.md`](README.md)「30 秒上手」。本手册是完整从零安装 + 全流程实测。
 
 ---
 
@@ -96,55 +98,49 @@ kanban init                  # 输出"看板就绪" + 状态目录
 kanban check                 # 看板 OK
 ```
 
-## 3. 走流程
+## 3. design 阶段:需求仓库(多模块/多游戏项目从这里开始)
+
+**需求未成型/多天讨论不进看板**,先沉淀到需求仓库 `requirements/`(进 git,团队共享):
 
 ```bash
-# 3.1 启动主会话(放 tmux 里,便于后面开任务窗口)
-tmux new -s main
-dsh --profile tui
-```
+# 3.1 初始化需求仓库(幂等: program/ art/ numeric/ + specs/ 规范模板)
+kanban design init
 
-## 2.5 前置阶段衔接(design → kanban: 需求仓库 → 看板)
-
-**前置(多天讨论)不进看板**: 主会话正常对话,产出沉淀为**需求仓库** `requirements/`
-(进 git,团队共享,跨会话不丢;多模块/多游戏项目按团队类型分目录,不再单文档平铺):
-
-```bash
-kanban design init        # 幂等: 生成 program/ art/ numeric/ + specs/ 规范模板 + README
-```
-
-| 目录 | 类型 | 编号 | 规范 | 谁写 |
-|---|---|---|---|---|
-| `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md`(含**技术架构**: 选型/模块/边界/数据流) | 主会话 Agent(引导提问); 架构切 plan 模型(强思考), 可 subagent 复核 |
-| `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) | 主会话 Agent |
-| `requirements/numeric/` | 数值需求 | REQ-N-NNN | `specs/numeric.md`(数值表/公式/平衡目标/调参记录) | 主会话 Agent |
-
-> 技术架构**直接维护在 `requirements/specs/program.md`「技术架构」章节**(程序团队的需求与架构一体,不另设独立文件);项目已有独立技术文档体系时用其位置并在 specs 里注明引用。**决策取舍写进对应需求文件「讨论与决策」章节**,稳定结论进 `kanban/MEMORY.md`,不单独维护 ADR 文档。
-
-**建需求文件**(每需求一个文件,编号自动递增,状态默认「待评审」):
-
-```bash
+# 3.2 建需求文件(每需求一个文件, 编号自动递增, 状态默认「待评审」)
 kanban design new --type program --module login --title "登录接口限流" --pri P1
 kanban design new --type art --module login --title "登录页视觉改版" --pri P0
 kanban design new --type numeric --module login --title "失败锁定阈值平衡" --pri P2
 ```
 
-头部字段: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
-(技术约束|产出规范|数值规范)/不在本轮范围/讨论与决策。旧式单文档(`## REQ-004`)仍兼容。
+| 目录 | 类型 | 编号 | 规范 |
+|---|---|---|---|
+| `requirements/program/` | 程序需求 | REQ-P-NNN | `specs/program.md`(含**技术架构**: 选型/模块/边界/数据流) |
+| `requirements/art/` | 美术需求 | REQ-A-NNN | `specs/art.md`(设计分辨率/产出文件夹/切图/通用UI) |
+| `requirements/numeric/` | 数值需求 | REQ-N-NNN | `specs/numeric.md`(数值表/公式/平衡目标/调参记录) |
 
-**多轮头脑风暴 = 追加新需求文件**(不覆盖旧的)。核对与去重(按优先级排序,含看板映射):
+- 需求文件头部字段: 类型/模块/优先级/状态/需求来源/关联需求;必含章节: 需求描述/验收标准/
+  (技术约束\|产出规范\|数值规范)/不在本轮范围/讨论与决策。旧式单文档(`## REQ-004`)仍兼容。
+- 技术架构直接维护在 `specs/program.md`「技术架构」章节;决策取舍写进需求文件「讨论与决策」,
+  稳定结论进 `kanban/MEMORY.md`。
+- 多轮头脑风暴 = 追加新需求文件(不覆盖旧的)。
 
 ```bash
-kanban design list                    # 全部, 含 → 看板 xxx [state]
+# 3.3 核对与去重(按优先级排序, 含看板映射)
+kanban design list                    # 全部
 kanban design list --type program     # 只列程序需求
-kanban req-status requirements        # 等价核对 (也可指旧式单文档)
+kanban req-status requirements        # 等价核对
+
+# 3.4 评审拍板: 把需求头部 - 状态: 改为「已拍板」
+# 3.5 正式看板化(自动导入契约; 已建卡的 REQ 拒绝防重复)
+kanban new --spec-file requirements --req REQ-P-001 feature rate-limit 登录接口限流 --review light
 ```
 
-**评审拍板**: 需求头部 `- 状态:` 改「已拍板」。**正式看板化**(按需求逐条;自动导入契约:
-需求描述→任务目标, 验收标准→验收条件, 范围→不在本轮范围, 类型/模块→卡片头部;已建卡的 REQ 拒绝防重复):
+## 4. 走流程
 
 ```bash
-kanban new --spec-file requirements --req REQ-P-001 feature rate-limit 登录接口限流 --review light
+# 4.1 启动主会话(放 tmux 里,便于后面开任务窗口)
+tmux new -s main
+dsh --profile tui
 ```
 
 在 TUI 里输入(可直接粘贴):
@@ -163,32 +159,32 @@ kanban new --spec-file requirements --req REQ-P-001 feature rate-limit 登录接
 按提示三选一选 `1. 确认计划并走看板` → Agent 会 `kanban new/pick/start`,
 自动开任务窗口 `kb-*` 并注入任务 prompt。
 
-## 4. 监控与交互(主会话外的任意终端)
+## 5. 监控与交互(主会话外的任意终端)
 
 ```bash
-# 4.1 看板状态
+# 5.1 看板状态
 kanban list                    # 卡片状态
 kanban show <task-id>          # 看卡(如 20260820-login-api-task)
 
-# 4.2 任务会话窗口
+# 5.2 任务会话窗口
 tmux list-windows -t main      # 0: bash  1: kb-login-api
 tmux attach -t main            # 切去看(ctrl-b 1 跳到任务窗口)
 # 任务会话稳定 id: kb-<task-id>, 恢复命令:
 dsh --profile tui --resume=kb-20260820-login-api-task
 
-# 4.3 任务组(多个任务时)
+# 5.3 任务组(多个任务时)
 kanban group <group-id>        # 依赖状态
 onevoke-group <group-id> --plan    # 编排计划
 
-# 4.4 Web 视图(手机/浏览器同网段访问)
+# 5.4 Web 视图(手机/浏览器同网段访问)
 kanban web --port 8090 &
 # 手机: http://<WSL-IP>:8090  (Windows 侧转发可复用 quicktui-portproxy.ps1 的模式)
 
-# 4.5 审核配置(可选,改角色模型)
+# 5.5 审核配置(可选,改角色模型)
 cat ~/.dsh/onevoke/reviewers.yml
 ```
 
-## 5. 验收与集成
+## 6. 验收与集成
 
 Agent 完成实现后会在任务窗口**请求验收**(含测试结果)。你确认后回复(可粘贴):
 
@@ -198,7 +194,29 @@ Agent 完成实现后会在任务窗口**请求验收**(含测试结果)。你�
 
 (本地 bare 远端,`push origin/develop` 不会影响任何外部仓库,放心走完整集成。)
 
-## 6. 验证结果
+## 7. 前端任务验证(L0-L5)
+
+前端任务按需走五级验证(前三级在卡内,后两级独立):
+
+| 层 | 测什么 | 谁做 | 怎么跑 |
+|---|---|---|---|
+| L0 静态断言 | 元素/文案/结构 | Agent(读代码) | 任务内 |
+| L1 JS 逻辑 | 交互逻辑(jsdom/mock DOM) | Agent(写测试跑) | 任务内 |
+| L2 接口联调 | 页面调用的后端接口 | Agent(curl) | 任务内 |
+| L3 浏览器 E2E | 点击→跳转→交互全流程 | Agent(真实浏览器) | `kanban e2e <task-id>` |
+| L4 视觉回归 | 样式是否被破坏 | 基线 + diff 工具 | `kanban visual <task-id>` |
+| L5 视觉还原 | 是否和设计稿一致 | **必须人/视觉模型** | 验收时人工确认 |
+
+```bash
+# L3: 建截图目录 + 指引(起服务 → 走流程 → 截图 screenshots/<task-id>/ → 记卡)
+kanban e2e <task-id>
+
+# L4: 首次把通过验收的截图放 screenshots/<task-id>/visual/baseline/
+#     之后每次截 current/ 同名文件, 自动 diff (ImageMagick compare → python3+PIL → 哈希兜底)
+kanban visual <task-id>
+```
+
+## 8. 验证结果
 
 ```bash
 cd ~/git/login-app
@@ -213,7 +231,7 @@ curl -s -X POST localhost:8080/api/login -d '{"user":"alice","pass":"wrong"}'   
 curl -s -X POST localhost:8080/api/login -d '{"user":"alice","pass":"right"}'   # 429 (锁定)
 ```
 
-## 7. 常见问题
+## 9. 常见问题
 
 | 现象 | 处理 |
 |---|---|

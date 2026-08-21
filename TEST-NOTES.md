@@ -1,6 +1,8 @@
-# dsh-onevoke 实测纪要
+# dsh-onevoke 实测纪要(维护者内部)
 
-> 真实项目(onevoke 仓库、login-app Go 项目)多轮端到端实测后的问题清单、处置与遗留。
+> **使用者无需阅读本文件**;安装与使用见 [`README.md`](README.md),完整从零手册见
+> [`PLAYBOOK.md`](PLAYBOOK.md),设计原理见 [`DESIGN.md`](DESIGN.md)。
+> 本文是维护者视角的实测记录: 真实项目(onevoke 仓库、login-app Go 项目)多轮端到端实测后的问题清单、处置与遗留。
 > 时间: 2026-08-20 · 环境: WSL Ubuntu + DeepSeek Harness (dsh)
 
 ## 一、已修复(插件侧)
