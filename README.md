@@ -62,7 +62,7 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 | `kanban design show <REQ-ID>` | 查看需求文件 |
 
 - 各团队规范见 `requirements/specs/`:`program.md`(含**技术架构**: 选型/模块/边界/数据流)、
-  `art.md`(设计分辨率/产出文件夹/切图/通用UI)、`numeric.md`(数值表/公式/平衡目标/调参记录);
+  `art.md`(设计系统令牌/分辨率适配/产出文件夹/切图/素材分层/reduced-motion)、`numeric.md`(数值表/公式/平衡目标/调参记录);
   决策取舍写进需求文件「讨论与决策」,稳定结论进 `kanban/MEMORY.md`。
 - 评审拍板:需求头部 `- 状态:` 改「已拍板」。
 
