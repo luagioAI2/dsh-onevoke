@@ -132,6 +132,10 @@
 - 实现: cmd_start 加 `--agent dsh|claude|codex`(默认 dsh);非 dsh 时自动 `tmux new-window -n kb-<slug>` 跑 `claude -p <prompt>` / `codex exec --skip-git-repo-check <prompt>`,prompt 内嵌;窗口命令先 `export PATH=$HOME/.local/bin:$HOME/.dsh/bin:$PATH` + source ~/.profile(API key 与 CLI 路径对窗口可见),结束 exec bash 保留窗口。
 - 坑×3: ① 缺 `import shlex`(NameError);② tmux 新窗口继承 tmux server 环境不继承 send-keys 的 export,假 CLI 须放系统 PATH;③ `bash -lc '...'` 外层单引号会被 prompt 内单引号提前终止 → 窗口秒退 —— 改为直接把命令字符串交给 tmux 执行(原版同款),实测通过。
 - 实测: 假 claude/codex 放 ~/.local/bin(env_load 加进窗口 PATH),start --agent claude/codex 均建出 kb-ext-cli 窗口、CLI 被调用(CLAUDE-STARTED / CODEX-STARTED + ARGC=3),卡进 working;--no-window 打印命令。
+
+### 5.16 executor 配置默认执行器
+- `.dsh-onevoke.yml` 支持 `executor: {agent: dsh|claude|codex}` 设 kanban start 默认执行器,`--agent` 命令行覆盖;`_parse_project_config` 段白名单加 executor。
+- 实测: 配置 executor.agent=codex 后,不带 --agent 的 start 自动走 Codex CLI、开 kb-ext-cli 窗口、CODEX-STARTED;配置已还原。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

@@ -403,6 +403,8 @@ BOARD_CONFIG_TEMPLATE = """# 看板配置 (kanban/.dsh-onevoke.yml) — 本看�
 #   Hacker: { provider: deepseek-official, model: deepseek-v4-flash }
 # permission:               # 任务会话沙箱 (默认 danger-full-access)
 #   mode: workspace-write
+# executor:                 # 任务执行器 (kanban start 默认用谁; --agent 可临时覆盖)
+#   agent: dsh              # dsh (DSH 会话, 默认) | claude | codex (外部 CLI, 自动开 tmux kb-* 窗口)
 """
 
 BOARD_RULES_TEMPLATE = """# 本看板项目规则 (kanban/RULES.md)
@@ -1670,7 +1672,7 @@ def _parse_project_config():
         if section == "reviewers" and indent >= 4 and subsection:
             cfg.setdefault("reviewers", {}).setdefault(subsection, {})[key] = val
             continue
-        if indent == 2 and section in ("model", "plan", "review", "permission"):
+        if indent == 2 and section in ("model", "plan", "review", "permission", "executor"):
             cfg.setdefault(section, {})[key] = val
     return cfg
 
@@ -1703,7 +1705,9 @@ def _ensure_session(session_id: str, cwd: str) -> bool:
 def cmd_start(args) -> int:
     no_window = "--no-window" in args
     ignore_deps = "--ignore-deps" in args
-    agent = "dsh"  # 执行器: dsh (默认, DSH 会话) | claude | codex (外部 CLI, tmux 窗口里跑)
+    # 执行器: 命令行 --agent 覆盖配置 executor, 默认 dsh (DSH 会话) | claude|codex (外部 CLI, tmux 窗口里跑)
+    cfg = _parse_project_config()
+    agent = (cfg.get("executor") or {}).get("agent", "dsh")
     rest = []
     i = 0
     while i < len(args):
@@ -1717,7 +1721,7 @@ def cmd_start(args) -> int:
             rest.append(a)
         i += 1
     if agent not in ("dsh", "claude", "codex"):
-        raise KanbanError("--agent 只能是 dsh|claude|codex")
+        raise KanbanError("--agent 只能是 dsh|claude|codex (或配置 executor.agent)")
     ids = [a for a in rest if not a.startswith("--")]
     if not ids:
         raise KanbanError("kanban start 需要 <task-id>")

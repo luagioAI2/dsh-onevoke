@@ -40,7 +40,8 @@ kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所�
 
 - **一键派活**: `kanban start --agent claude|codex <task-id>` —— 自动开 tmux 窗口
   `kb-<slug>` 跑对应 CLI(prompt 内嵌),**QuickTUI 必可见**(任务进程在 tmux 窗口里,
-  与 dsh 模式一致);默认 `--agent dsh` 走 DSH 会话执行。
+  与 dsh 模式一致);默认 `--agent dsh` 走 DSH 会话执行。项目可在 `.dsh-onevoke.yml`
+  设 `executor: {agent: claude|codex}` 把默认执行器固定为外部 CLI(如团队统一用 codex)。
 - **入口**: 项目 `AGENTS.md`(kanban init --agents 写入)是通用入口,任何智能体读它
   就知道规则位置(`~/.agents/skills/onevoke/SKILL.md`)与 kanban 指挥方式。
 - **流程**(以 Claude 为例,Codex 同理):
