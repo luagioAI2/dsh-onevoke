@@ -1065,7 +1065,9 @@ def _parse_reqs(path: Path):
                 section = sm.group(1).strip()
                 continue
             fm = re.match(r"^\s*-\s*([^:：]+)[:：]\s*(.+)$", line)
-            if fm:
+            # 只有头部 (首个 ## 之前) 的 "键: 值" 才是字段; 段落内 (如验收项 "微信登录: xxx")
+            # 也是这种形式, 但应作为该章节内容保留, 不能误当字段而丢进验收.
+            if fm and section is None:
                 reqs[cur]["fields"][fm.group(1).strip()] = fm.group(2).strip()
                 continue
             if section == "需求描述":
@@ -1097,9 +1099,12 @@ def _parse_reqs(path: Path):
 
 
 def _find_req_on_board(root: Path, req_id: str):
-    """在全部看板卡里搜 req_id 引用, 返回 (state, task_id) 或 None."""
+    """返回 (state, task_id) 若该需求已映射到某张卡, 否则 None.
+    只认卡片「讨论与决策」里的「需求来源: REQ-xxx」权威标记 (kanban new --spec-file 写入),
+    不再整卡子串匹配, 避免正文交叉引用 (如 "见 REQ-P-003") 被误判为"已建卡"."""
     for state, entry in iter_entries(root):
-        if req_id in read_card(entry):
+        text = read_card(entry)
+        if re.search(rf"^\s*需求来源:\s*{re.escape(req_id)}\s", text, re.M):
             return state, entry_id(entry)
     return None
 
@@ -1426,6 +1431,9 @@ def cmd_new(args) -> int:
         threat = f.get("威胁") or "N/A"
         scope = f.get("范围") or f"- 详见需求来源 {req_id}"
         text = text.replace("<填写>\n\n## 用户决策", f"{goal}\n\n## 用户决策")
+        # 预期成果: 需求有显式「预期成果」字段则用它, 否则回退需求描述(期望), 避免 pick 契约校验失败
+        expected = f.get("预期成果") or goal
+        text = text.replace("## 预期成果\n\n<填写>", f"## 预期成果\n\n{expected}")
         text = text.replace("## 用户决策\n\nN/A", "## 用户决策\n\n按需求文档执行 (需求来源见 讨论与决策)。")
         if accept != "<填写>":
             checks = "\n".join(f"- [ ] {a.strip()}" for a in accept.splitlines() if a.strip())
