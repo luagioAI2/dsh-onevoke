@@ -22,6 +22,7 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -54,8 +55,9 @@ USAGE = """用法:
   kanban e2e <task-id>                  L3 浏览器 E2E (独立阶段)
   kanban visual <task-id>               L4 视觉回归 (基线截图 diff)
   kanban pick [task-id]                    backlog -> todo (校验契约完整)
-  kanban start [--no-window] [--ignore-deps] [task-id]
-                                           todo -> working 并拉起新 DSH 会话 (校验依赖)
+  kanban start [--no-window] [--ignore-deps] [--agent dsh|claude|codex] [task-id]
+                                           todo -> working; 默认拉 dsh 会话; --agent claude|codex
+                                           自动开 tmux 窗口跑对应 CLI (QuickTUI 可见, 校验依赖)
   kanban resume <task-id>                  恢复卡片记录的会话 (崩溃/中断后续跑)
   kanban move <task-id> <todo|working|done|archived|trash>
   kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
@@ -334,9 +336,9 @@ Codex / 其他 agentic CLI) 都能驱动:
 2. 读 `kanban/RULES.md` 与 `kanban/MEMORY.md`(若存在)。
 3. 用 `kanban` CLI 驱动: 用户说"初始化看板" → `kanban init`(+`--agents`)/`kanban design init`/`kanban check`;
    用户给需求 → `kanban new` 建卡 → `kanban pick` → `kanban start`(卡进 working)。
-4. 任务执行两种模式按需选: ① 外部 CLI 执行 —— Claude/Codex 在自己环境用 `claude`/`codex` CLI
-   干 (worktree+提交+`onevoke-review` 审核), 不拉 dsh 会话; ② dsh 会话执行 —— 用
-   `kanban start` 拉起的 tmux `kb-*` 窗口跑 dsh TUI (QuickTUI 可看)。
+4. 任务执行两种模式按需选: ① 外部 CLI 执行 —— `kanban start --agent claude|codex` 自动开
+   tmux `kb-*` 窗口跑对应 CLI (QuickTUI 可见), 任务自己 worktree+提交+`onevoke-review` 审核;
+   ② dsh 会话执行 —— 默认 `kanban start` 拉起的 tmux `kb-*` 窗口跑 dsh TUI (QuickTUI 可看)。
 5. 审核用 `onevoke-review`(证据+门禁)交给 subagent 只读执行; 验收门禁不变 (用户确认后才集成)。
 """
 
@@ -1701,7 +1703,22 @@ def _ensure_session(session_id: str, cwd: str) -> bool:
 def cmd_start(args) -> int:
     no_window = "--no-window" in args
     ignore_deps = "--ignore-deps" in args
-    ids = [a for a in args if not a.startswith("--")]
+    agent = "dsh"  # 执行器: dsh (默认, DSH 会话) | claude | codex (外部 CLI, tmux 窗口里跑)
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--agent":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--agent 需要 dsh|claude|codex")
+            agent = args[i]
+        else:
+            rest.append(a)
+        i += 1
+    if agent not in ("dsh", "claude", "codex"):
+        raise KanbanError("--agent 只能是 dsh|claude|codex")
+    ids = [a for a in rest if not a.startswith("--")]
     if not ids:
         raise KanbanError("kanban start 需要 <task-id>")
     root = board_root()
@@ -1774,6 +1791,45 @@ def cmd_start(args) -> int:
     perm = (cfg.get("permission") or {}).get("mode", "danger-full-access")
     if perm not in ("read-only", "workspace-write", "danger-full-access"):
         perm = "danger-full-access"
+
+    # ── 外部 CLI 执行 (--agent claude|codex): 自动开 tmux 窗口跑对应 CLI, QuickTUI 可见 ──
+    if agent != "dsh":
+        bin_ = shutil.which(agent)
+        if not bin_:
+            raise KanbanError(f"未找到 {agent} CLI; 请先安装并加入 PATH (或改用默认 dsh 执行器)")
+        # 原版 onevoke 同款命令模板: claude -p / codex exec, 读 ~/.agents 规则 (install.sh 已装)
+        if agent == "claude":
+            agent_cmd = [bin_, "-p", prompt]
+            desc = "Claude CLI"
+        else:  # codex
+            agent_cmd = [bin_, "exec", "--skip-git-repo-check", prompt]
+            desc = "Codex CLI"
+        env_load = ("export PATH=\"$HOME/.local/bin:$HOME/.dsh/bin:$PATH\"; "
+                    "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\" 2>/dev/null || true")
+        quoted = " ".join(shlex.quote(p) for p in agent_cmd)
+        if no_window or not (os.environ.get("TMUX") and shutil.which("tmux")):
+            print(f"请在新终端启动任务会话 ({desc}):")
+            print(f"  {quoted}")
+            print("提示: 在 tmux 里跑则 QuickTUI 可见; 用 kanban web 看状态。")
+            return 0
+        slug = ids[0].split("-", 1)[1].rsplit("-task", 1)[0]
+        win = f"kb-{slug}"
+        # 不包 bash -lc '...' (prompt 里可能含单引号, 会破坏外层单引号导致语法错误窗口秒退);
+        # 直接把命令字符串交给 tmux 执行 (原版 onevoke 同款), tmux 自己用 shell 跑.
+        shell_cmd = (f"{env_load}; cd {shlex.quote(str(Path.cwd().resolve()))}; "
+                     f"{quoted}; echo; echo [任务会话已退出, 窗口保留]; exec bash")
+        r = subprocess.run(
+            ["tmux", "new-window", "-d", "-n", win, shell_cmd],
+            capture_output=True, text=True, check=False, timeout=15,
+        )
+        if r.returncode != 0:
+            print(f"tmux 启动失败 ({r.stderr.strip() or r.stdout.strip()}); 请手动运行:")
+            print(f"  {quoted}")
+            return 0
+        print(f"已在 tmux window [{win}] 启动 {desc} 任务会话, prompt 已内嵌")
+        print("QuickTUI attach 当前会话即可查看 (任务进程在 tmux 窗口里)。")
+        return 0
+
     env_prefix = f"DSH_PERMISSION_MODE={perm} "
     launch = [*dsh, "--profile", "tui"] + ([f"--resume={session_id}"] if stable else [])
     launch_cmd = env_prefix + " ".join(launch)

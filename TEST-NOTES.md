@@ -126,6 +126,12 @@
 - 身份结论: bin/kanban、onevoke-review、SKILL.md 是独立资源(不依赖 dsh),外部智能体模式只用这些;插件 patch(persona/技能/dsh 会话执行)是 dsh 集成层,两种模式并存。
 - 实现: SKILL「外部智能体指挥」章节重写为「外部智能体执行」: ① 外部 CLI 模式(claude/codex 自己 worktree+提交+onevoke-review 审核,不拉 dsh 会话,QuickTUI 不可见用 kanban web 看状态);② dsh 会话模式(默认, kb-* 窗口 QuickTUI 可见)。AGENTS.md 入口、README、install.sh 提示同步(两种模式)。
 - 实测: 新 AGENTS.md 入口含"外部 CLI 执行"字样,编译/bash -n 通过。
+
+### 5.15 kanban start --agent claude|codex(外部 CLI 自动开窗)
+- 需求: 原版 onevoke 默认 launcher=tmux **自动开 kb-* 窗口**跑 agent CLI(codex/grok),任务一定在 tmux 里(QuickTUI 可见);dsh-onevoke 现状只实现了 dsh 模式开窗,外部 CLI 模式没自动开窗 —— 补实现。
+- 实现: cmd_start 加 `--agent dsh|claude|codex`(默认 dsh);非 dsh 时自动 `tmux new-window -n kb-<slug>` 跑 `claude -p <prompt>` / `codex exec --skip-git-repo-check <prompt>`,prompt 内嵌;窗口命令先 `export PATH=$HOME/.local/bin:$HOME/.dsh/bin:$PATH` + source ~/.profile(API key 与 CLI 路径对窗口可见),结束 exec bash 保留窗口。
+- 坑×3: ① 缺 `import shlex`(NameError);② tmux 新窗口继承 tmux server 环境不继承 send-keys 的 export,假 CLI 须放系统 PATH;③ `bash -lc '...'` 外层单引号会被 prompt 内单引号提前终止 → 窗口秒退 —— 改为直接把命令字符串交给 tmux 执行(原版同款),实测通过。
+- 实测: 假 claude/codex 放 ~/.local/bin(env_load 加进窗口 PATH),start --agent claude/codex 均建出 kb-ext-cli 窗口、CLI 被调用(CLAUDE-STARTED / CODEX-STARTED + ARGC=3),卡进 working;--no-window 打印命令。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

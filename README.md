@@ -41,12 +41,11 @@ Agent 会: `kanban init`(建看板+模板)→(可选 `--agents` 写 AGENTS.md �
 与 `kanban` 指挥方式。
 
 **任务执行两种模式,按需选**:
-- **外部 CLI 执行**: 在 Claude 里任务让 `claude` CLI 干,Codex 里让 `codex` CLI 干 ——
-  `kanban new/pick/start` 管状态,任务在自己环境 worktree 实现 + `onevoke-review` 审核,
-  不用 dsh 会话(Onevoke 原版形态)。QuickTUI 是 tmux 客户端: 任务跑在 tmux 窗口里就可见
-  (外部模式不自动开窗口, 你在 tmux 里跑 claude/codex 即可); 不在 tmux 则用 `kanban web` 看状态;
-- **dsh 会话执行**: `kanban start` 自动拉起 `kb-*` 窗口跑 dsh TUI,任务在 DSH 会话隔离执行,
-  QuickTUI 实时可见(默认)。
+- **外部 CLI 执行**: `kanban start --agent claude|codex <id>` —— 在 Claude/Codex 里让
+  `claude`/`codex` CLI 干,kanban 自动开 tmux `kb-*` 窗口跑对应 CLI(prompt 内嵌),
+  QuickTUI 必可见;任务自己 worktree 实现 + `onevoke-review` 审核(Onevoke 原版形态);
+- **dsh 会话执行**(默认): `kanban start <id>` 拉起 `kb-*` 窗口跑 dsh TUI,任务在 DSH
+  会话隔离执行,QuickTUI 实时可见。
 
 **开始任务**:
 

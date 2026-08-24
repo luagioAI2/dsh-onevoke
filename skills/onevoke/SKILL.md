@@ -38,28 +38,29 @@ dsh-onevoke 的看板可以由**任意有 shell 的智能体**驱动,任务执�
 kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所谓 —— 这正是 Onevoke
 原版的形态(kanban + codex/grok wrapper)。
 
+- **一键派活**: `kanban start --agent claude|codex <task-id>` —— 自动开 tmux 窗口
+  `kb-<slug>` 跑对应 CLI(prompt 内嵌),**QuickTUI 必可见**(任务进程在 tmux 窗口里,
+  与 dsh 模式一致);默认 `--agent dsh` 走 DSH 会话执行。
 - **入口**: 项目 `AGENTS.md`(kanban init --agents 写入)是通用入口,任何智能体读它
   就知道规则位置(`~/.agents/skills/onevoke/SKILL.md`)与 kanban 指挥方式。
 - **流程**(以 Claude 为例,Codex 同理):
   1. 读规则 → `kanban new` 建卡(填契约)→ `kanban pick`;
-  2. `kanban start` 把卡迁入 `working/`,**但不用它拉起的 dsh 会话** —— 直接在自己
-     环境按技能流程执行: worktree + 分支(基于最新 origin/develop)→ 实现 → 验证 →
+  2. `kanban start --agent claude <id>` 把卡迁入 `working/` 并开窗口跑 `claude -p <prompt>`,
+     任务按技能流程执行: worktree + 分支(基于最新 origin/develop)→ 实现 → 验证 →
      按关注点提交 → push 任务分支;
   3. 审核: `onevoke-review <worktree> <base> <commit> <role> <任务>` 生成证据与角色
-     Prompt,交给**自己环境的 subagent**(`claude` 用子代理 / `codex exec --sandbox
-     read-only`)只读执行,结论写回卡片「实施与验证」;
+     Prompt,交给**subagent**(`claude` 用子代理 / `codex exec --sandbox read-only`)
+     只读执行,结论写回卡片「实施与验证」;
   4. 向用户请求验收 → 确认 → 集成(合回 develop)→ `结果: completed` → `kanban move done`。
-- **会话与 QuickTUI**: QuickTUI 是 tmux 客户端,只要任务进程跑在 **tmux 的窗口里**就能看到。
-  两种模式差异只在"谁开窗口": dsh 模式由 `kanban start` 自动建 `kb-*` 窗口(必在 tmux, 必可见);
-  外部 CLI 模式**不自动开窗口** —— 你在 tmux 会话里开窗口跑 `claude -p`/`codex exec` 就可见,
-  跑在非 tmux 环境(Windows 终端/IDE 终端/后台 daemon)就看不到,此时用 `kanban web` 看状态、
-  `kanban list/show` 看进度。
-- **或走 dsh 执行**: 需要 QuickTUI 可见 / 想用 DSH 会话隔离时,仍用 `kanban start`
-  拉起的 `kb-*` 窗口跑 dsh TUI(见「任务 = 独立 DSH 会话」)。两种模式并存,按需选。
+- **QuickTUI**: 外部 CLI 模式与 dsh 模式一样由 `kanban start` 自动开 `kb-*` 窗口
+  (任务进程必在 tmux 里),QuickTUI attach 即见;`--no-window` 时只打印命令,自己在
+  tmux 里跑也可见,跑在非 tmux 环境则用 `kanban web` 看状态。
+- **或走 dsh 执行**: 想用 DSH 会话隔离时用默认 `kanban start`(拉 `kb-*` 窗口跑 dsh TUI)。
+  两种模式并存,按需选。
 - **审核、验收、红线、防假绿等门禁两种模式完全一致**(见相应章节)。
 - 工具链要求: 执行环境能跑 `kanban` / `onevoke-review`(已装 `~/.local/bin` 在 PATH);
-  Claude/Codex CLI 需各自配置好凭据;若由 dsh 会话执行,API key 见 `~/.profile` 与
-  start 的 env 加载。
+  Claude/Codex CLI 需各自配置好凭据;start 开窗时自动加载 `~/.profile` 与
+  `~/.local/bin`(API key 与命令路径对任务窗口可见)。
 
 > **身份说明**: 本包是 dsh 插件(bundle patch: persona + 技能集成 + DSH 会话执行),
 > 但 `bin/kanban`、`bin/onevoke-review`、`skills/onevoke/SKILL.md` 是**独立资源**,
