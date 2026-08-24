@@ -333,8 +333,11 @@ Codex / 其他 agentic CLI) 都能驱动:
 1. 先读流程契约: `~/.agents/skills/onevoke/SKILL.md`(DSH 会话里用 skill 工具加载同名技能; 外部智能体直接读该文件)。
 2. 读 `kanban/RULES.md` 与 `kanban/MEMORY.md`(若存在)。
 3. 用 `kanban` CLI 驱动: 用户说"初始化看板" → `kanban init`(+`--agents`)/`kanban design init`/`kanban check`;
-   用户给需求 → `kanban new` 建卡 → `kanban pick` → `kanban start`(拉起 dsh 独立会话在 tmux `kb-*` 窗口执行, QuickTUI 可看)。
-4. 审核用 `onevoke-review`(证据+门禁)交给 DSH subagent 只读执行。
+   用户给需求 → `kanban new` 建卡 → `kanban pick` → `kanban start`(卡进 working)。
+4. 任务执行两种模式按需选: ① 外部 CLI 执行 —— Claude/Codex 在自己环境用 `claude`/`codex` CLI
+   干 (worktree+提交+`onevoke-review` 审核), 不拉 dsh 会话; ② dsh 会话执行 —— 用
+   `kanban start` 拉起的 tmux `kb-*` 窗口跑 dsh TUI (QuickTUI 可看)。
+5. 审核用 `onevoke-review`(证据+门禁)交给 subagent 只读执行; 验收门禁不变 (用户确认后才集成)。
 """
 
 

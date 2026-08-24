@@ -38,7 +38,14 @@ Agent 会: `kanban init`(建看板+模板)→(可选 `--agents` 写 AGENTS.md �
 
 **主会话可以是任何智能体**(Claude/Codex/DSH TUI/Harness): 项目 `AGENTS.md` 是通用入口
 (kanban init --agents 写入),任何智能体读它就知道流程契约位置(`~/.agents/skills/onevoke/SKILL.md`)
-与 `kanban` 指挥方式;任务执行始终由 `kanban start` 拉起的 DSH 独立会话完成(QuickTUI 可见)。
+与 `kanban` 指挥方式。
+
+**任务执行两种模式,按需选**:
+- **外部 CLI 执行**: 在 Claude 里任务让 `claude` CLI 干,Codex 里让 `codex` CLI 干 ——
+  `kanban new/pick/start` 管状态,任务在自己环境 worktree 实现 + `onevoke-review` 审核,
+  不用 dsh 会话(Onevoke 原版形态;QuickTUI 看不到任务窗口,用 `kanban web` 看状态);
+- **dsh 会话执行**: `kanban start` 拉起 `kb-*` 窗口跑 dsh TUI,任务在 DSH 会话隔离执行,
+  QuickTUI 实时可见(默认)。
 
 **开始任务**:
 

@@ -31,18 +31,36 @@ kanban check                # 校验看板入口
 - 想随时看板状态: `kanban web`(HTML + JSON API,手机/浏览器同网段访问)。
 - 已初始化的项目再执行只是校验,不会破坏已有看板。
 
-## 外部智能体指挥(Claude/Codex/其他 agentic CLI 驱动)
+## 外部智能体执行(Claude CLI / Codex CLI 自己跑任务, 不用 dsh 会话)
 
-dsh-onevoke 的看板可以由**任意有 shell 的智能体**驱动,不必在 DSH 会话里:你在 Claude/Codex
-等里说"初始化看板/建任务",它们读项目 `AGENTS.md`(kanban init --agents 写入)→ 读本规则
-(`~/.agents/skills/onevoke/SKILL.md`,与本技能同一份文件)→ 用 `kanban` CLI 指挥,任务执行
-**始终由 `kanban start` 拉起的 DSH 独立会话完成**(tmux `kb-*` 窗口,QuickTUI 可见)。
+dsh-onevoke 的看板可以由**任意有 shell 的智能体**驱动,任务执行也**不必走 dsh**:
+你在 Claude 里,任务就让 `claude` CLI 干;在 Codex 里,任务就让 `codex` CLI 干。
+kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所谓 —— 这正是 Onevoke
+原版的形态(kanban + codex/grok wrapper)。
 
-- **指挥者只做**: 读规则 → 初始化/建卡/派活(`kanban init/new/pick/start/move/list/show`)→ 汇总结论;任务实现、worktree、审核、验收在任务会话里由 DSH Agent 完成,指挥者不代劳。
-- **审核**: 指挥者用 `onevoke-review <worktree> <base> <commit> <role> <任务>` 生成证据与角色 Prompt,交给**自己环境的 subagent** 或 DSH 会话只读执行;结论写回卡片。
-- **验收门禁不变**: 任务完成后仍由用户确认验收才集成(见「验收、集成与完成」)。
-- 工具链要求: 指挥者环境能跑 `kanban` / `onevoke-review`(已装 `~/.local/bin` 并在 PATH)、能访问同一 WSL 环境与 tmux;API key 对任务会话可见(见 `~/.profile` 与 start 的 env 加载)。
-- 项目 `AGENTS.md` 是本入口: 任何智能体进项目先读它,就知道"看板流程 + 规则文件位置 + 指挥方式"。
+- **入口**: 项目 `AGENTS.md`(kanban init --agents 写入)是通用入口,任何智能体读它
+  就知道规则位置(`~/.agents/skills/onevoke/SKILL.md`)与 kanban 指挥方式。
+- **流程**(以 Claude 为例,Codex 同理):
+  1. 读规则 → `kanban new` 建卡(填契约)→ `kanban pick`;
+  2. `kanban start` 把卡迁入 `working/`,**但不用它拉起的 dsh 会话** —— 直接在自己
+     环境按技能流程执行: worktree + 分支(基于最新 origin/develop)→ 实现 → 验证 →
+     按关注点提交 → push 任务分支;
+  3. 审核: `onevoke-review <worktree> <base> <commit> <role> <任务>` 生成证据与角色
+     Prompt,交给**自己环境的 subagent**(`claude` 用子代理 / `codex exec --sandbox
+     read-only`)只读执行,结论写回卡片「实施与验证」;
+  4. 向用户请求验收 → 确认 → 集成(合回 develop)→ `结果: completed` → `kanban move done`。
+- **会话与 QuickTUI**: 这种模式任务不在 dsh 会话里跑,QuickTUI 看不到任务窗口
+  (它只 attach tmux);可用 `kanban web` 看状态、`kanban list/show` 看进度。
+- **或走 dsh 执行**: 需要 QuickTUI 可见 / 想用 DSH 会话隔离时,仍用 `kanban start`
+  拉起的 `kb-*` 窗口跑 dsh TUI(见「任务 = 独立 DSH 会话」)。两种模式并存,按需选。
+- **审核、验收、红线、防假绿等门禁两种模式完全一致**(见相应章节)。
+- 工具链要求: 执行环境能跑 `kanban` / `onevoke-review`(已装 `~/.local/bin` 在 PATH);
+  Claude/Codex CLI 需各自配置好凭据;若由 dsh 会话执行,API key 见 `~/.profile` 与
+  start 的 env 加载。
+
+> **身份说明**: 本包是 dsh 插件(bundle patch: persona + 技能集成 + DSH 会话执行),
+> 但 `bin/kanban`、`bin/onevoke-review`、`skills/onevoke/SKILL.md` 是**独立资源**,
+> 不依赖 dsh —— 外部智能体模式只用这些资源,装不装插件 patch 都能跑(install.sh 已装)。
 
 ## 基础规则(通用条款)
 
