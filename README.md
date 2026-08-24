@@ -159,6 +159,21 @@ permission:               # 任务会话沙箱 (默认 danger-full-access)
 
 ---
 
+## 平台分工(Windows / WSL)
+
+| 能力 | Windows(DSH Desktop / Harness Web) | WSL(原生 dsh) |
+|---|---|---|
+| 主会话 | ✅ Harness Web / DSH Desktop | ✅ dsh TUI |
+| 看板查看 | ✅ `kanban web`(浏览器)+ 读文件 | ✅ `kanban list/show` + `kanban web` |
+| 建卡/初始化 | ⚠️ 需真 Python(Store stub 不可用)才跑 `kanban` CLI | ✅ 全命令 |
+| 任务执行 | ❌(无 tmux/真 TTY) | ✅ `kanban start` 开 `kb-*` 窗口 |
+| QuickTUI 看任务 | ❌(tmux 是 POSIX 工具) | ✅ attach 可见 |
+| 审核 onevoke-review | ❌(bash 脚本,需 Git Bash) | ✅ 全流程 |
+
+**默认用法**:Windows 上用 Harness Web 做**主会话与指挥**(说需求、看状态),WSL 负责**任务执行
+与审核**(kanban start / tmux / QuickTUI)。跨平台命令 `kanban` 设计上走 WSL 的 python3 与
+POSIX 工具链;Windows 侧仅当装了真 Python 且用 Git Bash 时才可跑部分 CLI。
+
 ## 已知限制
 
 - **Windows TTY**: TUI 需要真 TTY——执行走 WSL 原生 `dsh`;Windows 侧 node 版只能 headless,
