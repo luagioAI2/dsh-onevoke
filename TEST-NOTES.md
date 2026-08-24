@@ -120,6 +120,11 @@
 - 根因: 用户 API key 写在 `~/.bashrc`,而 `.bashrc` 开头有非交互早退 (`case $- in *i*) ;; *) return;; esac`)——`bash -lc`(start 窗口包装)是非交互,读到 return 直接退出,key 从未 export。`bash --login -c` 同理(login 也走 .profile→.bashrc,早退仍在)。
 - 处置: ① 环境侧: key 复制到 `~/.profile`(login shell 必读,无早退),验证 `bash -lc`/`bash --login` 均可见;② 插件侧: kanban start 窗口包装在启动 dsh 前显式 `. ~/.profile`(无早退,失败无害),与 login 加载双保险。
 - 实测: 修后 start 重开 kb-hello,任务 Agent 真实跑起来(读文件/调工具/思考),API key 报错消失;手工 `. ~/.profile` 在 tmux 窗口内 key 可见。坑: 测试脚本里 `\$HOME` 转义在 wsl sh 层会被提前展开,须按 start 原样 shell_cmd 结构验证。
+
+### 5.14 外部智能体指挥(Claude/Codex 驱动, dsh 执行)
+- 需求: 用户在主会话是别的智能体(如 Claude)时,对它说"初始化看板/建任务"也能驱动 dsh-onevoke;任务执行仍走 dsh 独立会话(QuickTUI 可见)。
+- 实现: ① install.sh 把 SKILL.md 同时装到 `~/.agents/skills/onevoke/`(Claude Code/Codex 等通用规则目录);② `kanban init --agents` 的 AGENTS.md 入口改为通用表述(任何智能体读它 → 规则文件路径 → kanban 指挥方式 → 审核 onevoke-review → 验收门禁不变);③ SKILL 新增「外部智能体指挥」章节(指挥者只做 init/new/pick/start/move/list/show,任务实现/审核/验收在 dsh 会话;审核证据交自己环境 subagent 或 dsh 只读执行)。
+- 实测(模拟 Claude 视角,新项目): 读 AGENTS.md 入口 → 规则文件可达 → kanban new/pick → start 拉起 kb-hello(dsh TUI 运行、无 API key 报错、卡进 working)。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

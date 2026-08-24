@@ -36,6 +36,10 @@ dsh --profile tui --dump-config
 
 Agent 会: `kanban init`(建看板+模板)→(可选 `--agents` 写 AGENTS.md 入口)→ `kanban design init`(需求仓库)→ `kanban check` 校验。
 
+**主会话可以是任何智能体**(Claude/Codex/DSH TUI/Harness): 项目 `AGENTS.md` 是通用入口
+(kanban init --agents 写入),任何智能体读它就知道流程契约位置(`~/.agents/skills/onevoke/SKILL.md`)
+与 `kanban` 指挥方式;任务执行始终由 `kanban start` 拉起的 DSH 独立会话完成(QuickTUI 可见)。
+
 **开始任务**:
 
 ```

@@ -16,6 +16,13 @@ rm -rf "$SKILLS_DIR/onevoke"
 cp -r "$HERE/skills/onevoke" "$SKILLS_DIR/onevoke"
 echo "技能已安装: $SKILLS_DIR/onevoke"
 
+# 1b. 规则 -> ~/.agents/skills/onevoke (外部智能体规则目录: Claude Code / Codex /
+#     kimi 等读 AGENTS.md 时也能拿到同一份流程契约, 实现"外部智能体指挥, dsh 执行")
+AGENTS_RULES_DIR="${HOME}/.agents/skills/onevoke"
+mkdir -p "$AGENTS_RULES_DIR"
+cp -r "$HERE/skills/onevoke/." "$AGENTS_RULES_DIR/"
+echo "规则已安装(外部智能体): $AGENTS_RULES_DIR"
+
 # 2. CLI -> ~/.local/bin (POSIX/WSL) 与 $DSH_HOME/bin (跨平台, Windows pwsh 也可用)
 # 防御: Windows git autocrlf 可能让工作区脚本带 CRLF, 剥掉 \r 保证 shebang 可用
 for f in kanban onevoke-review onevoke-group create-session.mjs; do

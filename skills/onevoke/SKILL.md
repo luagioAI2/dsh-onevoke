@@ -31,6 +31,19 @@ kanban check                # 校验看板入口
 - 想随时看板状态: `kanban web`(HTML + JSON API,手机/浏览器同网段访问)。
 - 已初始化的项目再执行只是校验,不会破坏已有看板。
 
+## 外部智能体指挥(Claude/Codex/其他 agentic CLI 驱动)
+
+dsh-onevoke 的看板可以由**任意有 shell 的智能体**驱动,不必在 DSH 会话里:你在 Claude/Codex
+等里说"初始化看板/建任务",它们读项目 `AGENTS.md`(kanban init --agents 写入)→ 读本规则
+(`~/.agents/skills/onevoke/SKILL.md`,与本技能同一份文件)→ 用 `kanban` CLI 指挥,任务执行
+**始终由 `kanban start` 拉起的 DSH 独立会话完成**(tmux `kb-*` 窗口,QuickTUI 可见)。
+
+- **指挥者只做**: 读规则 → 初始化/建卡/派活(`kanban init/new/pick/start/move/list/show`)→ 汇总结论;任务实现、worktree、审核、验收在任务会话里由 DSH Agent 完成,指挥者不代劳。
+- **审核**: 指挥者用 `onevoke-review <worktree> <base> <commit> <role> <任务>` 生成证据与角色 Prompt,交给**自己环境的 subagent** 或 DSH 会话只读执行;结论写回卡片。
+- **验收门禁不变**: 任务完成后仍由用户确认验收才集成(见「验收、集成与完成」)。
+- 工具链要求: 指挥者环境能跑 `kanban` / `onevoke-review`(已装 `~/.local/bin` 并在 PATH)、能访问同一 WSL 环境与 tmux;API key 对任务会话可见(见 `~/.profile` 与 start 的 env 加载)。
+- 项目 `AGENTS.md` 是本入口: 任何智能体进项目先读它,就知道"看板流程 + 规则文件位置 + 指挥方式"。
+
 ## 基础规则(通用条款)
 
 **交流与格式**
