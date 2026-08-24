@@ -1789,9 +1789,13 @@ def cmd_start(args) -> int:
     # tmux 模式: 新建 kb-<slug> window 跑 TUI, 注入任务 prompt.
     # 用 bash -lc 包装: dsh 退出后窗口保持打开 (tmux 默认 remain-on-exit off
     # 会在命令退出时自动关窗, 导致 send-keys 找不到 pane).
+    # 环境加载: bash -lc 是 login shell 会读 ~/.profile, 但 ~/.bashrc 常有非交互
+    # 早退 (case $- in *i*) ;; *) return) 使其中 export 的 API key 对任务窗口不可见.
+    # 这里启动 dsh 前显式 source ~/.profile (无早退), 与 login 加载双保险.
     slug = ids[0].split("-", 1)[1].rsplit("-task", 1)[0]
     win = f"kb-{slug}"
-    shell_cmd = f"bash -lc '{launch_cmd}; echo; echo [任务会话已退出, 窗口保持打开; 恢复: dsh --profile tui --resume={session_id if stable else '<id>'}]; exec bash'"
+    env_load = "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\" 2>/dev/null || true"
+    shell_cmd = f"bash -lc '{env_load}; {launch_cmd}; echo; echo [任务会话已退出, 窗口保持打开; 恢复: dsh --profile tui --resume={session_id if stable else '<id>'}]; exec bash'"
     r = subprocess.run(
         ["tmux", "new-window", "-d", "-n", win, shell_cmd],
         capture_output=True, text=True, check=False, timeout=15,
