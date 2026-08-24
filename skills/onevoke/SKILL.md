@@ -49,8 +49,11 @@ kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所�
      Prompt,交给**自己环境的 subagent**(`claude` 用子代理 / `codex exec --sandbox
      read-only`)只读执行,结论写回卡片「实施与验证」;
   4. 向用户请求验收 → 确认 → 集成(合回 develop)→ `结果: completed` → `kanban move done`。
-- **会话与 QuickTUI**: 这种模式任务不在 dsh 会话里跑,QuickTUI 看不到任务窗口
-  (它只 attach tmux);可用 `kanban web` 看状态、`kanban list/show` 看进度。
+- **会话与 QuickTUI**: QuickTUI 是 tmux 客户端,只要任务进程跑在 **tmux 的窗口里**就能看到。
+  两种模式差异只在"谁开窗口": dsh 模式由 `kanban start` 自动建 `kb-*` 窗口(必在 tmux, 必可见);
+  外部 CLI 模式**不自动开窗口** —— 你在 tmux 会话里开窗口跑 `claude -p`/`codex exec` 就可见,
+  跑在非 tmux 环境(Windows 终端/IDE 终端/后台 daemon)就看不到,此时用 `kanban web` 看状态、
+  `kanban list/show` 看进度。
 - **或走 dsh 执行**: 需要 QuickTUI 可见 / 想用 DSH 会话隔离时,仍用 `kanban start`
   拉起的 `kb-*` 窗口跑 dsh TUI(见「任务 = 独立 DSH 会话」)。两种模式并存,按需选。
 - **审核、验收、红线、防假绿等门禁两种模式完全一致**(见相应章节)。
