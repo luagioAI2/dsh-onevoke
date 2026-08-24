@@ -146,6 +146,11 @@
 - 原版 onevoke 有 `check_concurrency`(KANBAN_MAX_CONCURRENT_TASKS 环境变量 + config max_concurrent_tasks),dsh-onevoke 缺 —— 补上。
 - 实现: `.dsh-onevoke.yml` 新 `limits.max_concurrent_tasks`(0=不限,默认),环境变量 `KANBAN_MAX_CONCURRENT_TASKS` 覆盖;`_check_concurrency` 统计 working 卡数(含大任务目录),达到上限拒绝 start;cmd_start 在依赖检查后调用;`_parse_project_config` 白名单加 limits。
 - 实测: 配置 limit=1,start A 成功(working=1)后 start B 被拒("已达到并发上限: working 中有 1 张卡, max_concurrent_tasks=1");KANBAN_MAX_CONCURRENT_TASKS=2 放行 B。配置已还原。
+
+### 5.19 管理者模式(指挥会话: 只执行命令, 不盯任务)
+- 需求: 用户开 Harness 会话只当 kanban 管理者(转换需求/建卡/派活/看状态),任务在独立 kb-* 会话执行,管理会话派活后立即结束回合,不轮询盯进度。
+- 实现: SKILL「外部智能体执行」新增「管理者模式」小节(只执行 kanban 命令;start 后立即交还控制权禁轮询;被问进度才查;并发达上限如实告知不绕过;对 DSH/外部智能体都成立);「何时使用」补"用户只让执行命令"触发。
+- README 补管理者模式一段。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

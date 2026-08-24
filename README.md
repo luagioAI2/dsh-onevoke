@@ -40,6 +40,10 @@ Agent 会: `kanban init`(建看板+模板)→(可选 `--agents` 写 AGENTS.md �
 (kanban init --agents 写入),任何智能体读它就知道流程契约位置(`~/.agents/skills/onevoke/SKILL.md`)
 与 `kanban` 指挥方式。
 
+**管理者模式**: 你的会话可以只当 **kanban 管理者**(指挥者) —— 只执行命令
+(转换需求、建卡、`kanban start` 派活、看状态),任务在独立 `kb-*` 会话执行,**派活后
+立即结束回合不盯任务**;被问进度才查。任务完成由执行会话在自己窗口向用户汇报(QuickTUI 可见)。
+
 **任务执行两种模式,按需选**:
 - **外部 CLI 执行**: `kanban start --agent claude|codex <id>` —— 在 Claude/Codex 里让
   `claude`/`codex` CLI 干,kanban 自动开 tmux `kb-*` 窗口跑对应 CLI(prompt 内嵌),

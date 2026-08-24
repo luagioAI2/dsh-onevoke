@@ -13,6 +13,8 @@ description: Onevoke 式看板工作流: 需求走文件看板(backlog→todo→
 - 用户提出需求/任务/Bug/改动,且该走流程时(开发类)。
 - 用户明确说"走看板 / 建任务 / 按流程来"。
 - 用户说"初始化看板 / 建需求仓库 / 用看板管理这个项目"(新项目接入,见「项目初始化」)。
+- **用户只让执行命令、不让自己干活**(如"用 kanban 建任务并启动, 你只是管理者")→ 按
+  「管理者模式」执行: 只跑 kanban 命令, start 后立即结束回合不盯任务。
 - 纯问答、只读排查、纯文档微调、发布部署不强制走流程;用户要求时照走。
 
 ## 项目初始化(新项目接入看板,一条话触发)
@@ -37,6 +39,24 @@ dsh-onevoke 的看板可以由**任意有 shell 的智能体**驱动,任务执�
 你在 Claude 里,任务就让 `claude` CLI 干;在 Codex 里,任务就让 `codex` CLI 干。
 kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所谓 —— 这正是 Onevoke
 原版的形态(kanban + codex/grok wrapper)。
+
+### 管理者模式(指挥会话: 只执行命令, 不盯任务)
+
+你的会话可能是**kanban 管理者**(指挥者): 用户开这个会话只是为了转换需求、建卡、
+派活、看状态 —— 相当于看板的管理入口, 不做任务本身。此时:
+
+- **只执行 kanban 命令**: `kanban init/new/pick/start/move/list/show/design/web` 等;
+  任务实现、worktree、审核、验收全部在 `kanban start` 拉起的独立 `kb-*` 会话里完成,
+  管理者**不代劳、不跟进**。
+- **start 后立即结束回合**: 派活成功(`-> working` 或窗口已开)后**马上交还控制权**,
+  禁轮询/等待/反复 `kanban list` 盯进度;任务完成时执行会话会在自己窗口向用户汇报
+  (QuickTUI 可见),或用户主动查看。
+- **被问进度才查**: 用户问"任务到哪了"时才 `kanban list/show` 或 `kanban web` 汇报;
+  不主动巡检(除非用户明确要求跟踪)。
+- **并发与资源**: 派多个任务前先 `kanban list working` 看并发(上限见
+  `limits.max_concurrent_tasks`);达到上限时 start 会被拒,管理者如实告知用户,不绕过。
+- 这一定位对**本会话是 DSH(Harness/TUI)还是外部智能体(Claude/Codex)**都成立:
+  管理者只下命令,执行永远在独立任务会话。
 
 - **一键派活**: `kanban start --agent claude|codex <task-id>` —— 自动开 tmux 窗口
   `kb-<slug>` 跑对应 CLI(prompt 内嵌),**QuickTUI 必可见**(任务进程在 tmux 窗口里,
