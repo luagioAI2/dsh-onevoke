@@ -108,6 +108,12 @@
 
 ### 5.10 美术规范增强(othersflow 设计经验,通用化)
 - othersflow 设计资产: design-system.md(色彩令牌/字体/间距/图标系统/效果图流程)、banner 容器尺寸规范(真实组件量几何/比例区间+安全区/object-fit 裁切计算)、主题复刻规范(规则三段式: 规则/判定标准/反例;基准机;reduced-motion)、素材分层(品牌层 vs 主题层)、图集与 .json 边车一致性。
+
+### 5.12 一句话初始化 + QuickTUI 可见
+- 需求: 装了 dsh-onevoke 的电脑上,DSH 会话里说"在这个项目初始化看板",Agent 自动初始化;看板任务在 QuickTUI 可见。
+- SKILL 新增「项目初始化」章节: `kanban init` → `kanban init --agents` → `kanban design init` → `kanban check`(全部幂等),一句话触发不逐条追问;「何时使用」补初始化触发;cordis.patch.yml persona 触发条件补 "or asks to initialize the kanban board for this project"。
+- QuickTUI 说明写入 SKILL/README: start 在 tmux 建 `kb-<slug>` 窗口(QuickTUI attach 可见可输入),`kanban web` 看板状态页。
+- 实测(全新 /tmp/freshproj git 项目): init→--agents→design init→check 全链通过、重复 init 幂等;在 tmux 会话内 start 建出 `kb-fresh-demo` 窗口、输出 "QuickTUI 可直接 attach 查看"。坑: start 需要 TMUX 环境(脚本进程不在 tmux 会话内会走 no-window 分支打印而非建窗);working→todo 非法迁移正确拦截。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

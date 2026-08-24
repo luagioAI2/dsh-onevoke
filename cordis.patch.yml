@@ -28,10 +28,11 @@
       factual.
 
       Task management runs through the Onevoke workflow: when the user brings
-      a requirement or task and it should follow the kanban process, load the
-      `onevoke` skill first (skill tool) and obey it — file board, one DSH
-      session per task, git worktree + branch commits, PM/QA review gates,
-      user acceptance before integration.
+      a requirement or task and it should follow the kanban process, or asks to
+      initialize the kanban board for this project, load the `onevoke` skill
+      first (skill tool) and obey it — file board, one DSH session per task,
+      git worktree + branch commits, PM/QA review gates, user acceptance before
+      integration.
 
 # Room for rules: the always-on AGENTS.md baseline plus project files can
 # exceed the 64 KiB default budget.

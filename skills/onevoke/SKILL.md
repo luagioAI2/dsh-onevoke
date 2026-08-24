@@ -12,7 +12,24 @@ description: Onevoke 式看板工作流: 需求走文件看板(backlog→todo→
 
 - 用户提出需求/任务/Bug/改动,且该走流程时(开发类)。
 - 用户明确说"走看板 / 建任务 / 按流程来"。
+- 用户说"初始化看板 / 建需求仓库 / 用看板管理这个项目"(新项目接入,见「项目初始化」)。
 - 纯问答、只读排查、纯文档微调、发布部署不强制走流程;用户要求时照走。
+
+## 项目初始化(新项目接入看板,一条话触发)
+
+用户说"在这个项目初始化 kanban/看板"时,依次执行(全部幂等,已存在自动跳过):
+
+```bash
+kanban init                 # 建看板 6 状态目录 + .dsh-onevoke.yml/RULES.md/MEMORY.md 模板 + git 本地排除 kanban/
+kanban init --agents        # 项目根 AGENTS.md 写 onevoke opt-in 入口 (可选; 多会话/多机共享时建议)
+kanban design init          # 建需求仓库 requirements/ (program|art|numeric + specs 规范) (可选; 多模块/多游戏项目建议)
+kanban check                # 校验看板入口
+```
+
+- **一句话即可**: 用户只需说"初始化看板",Agent 按上述顺序执行并汇报结果,不逐条追问。
+- 初始化后即可开工: `kanban new` 建卡 → `kanban pick` → `kanban start`(任务在 tmux 窗口 `kb-<slug>` 跑,QuickTUI 可 attach 查看)。
+- 想随时看板状态: `kanban web`(HTML + JSON API,手机/浏览器同网段访问)。
+- 已初始化的项目再执行只是校验,不会破坏已有看板。
 
 ## 基础规则(通用条款)
 
@@ -175,6 +192,8 @@ requirements/
   - 任务会话默认 `DSH_PERMISSION_MODE=danger-full-access`(Onevoke 同款免确认沙箱,能 push 外部远端);项目可在 `.dsh-onevoke.yml` 设 `permission: {mode: workspace-write}` 收紧。用户主会话保持 workspace-write + ask。
   - 在 tmux 中:新建 `kb-<slug>` window,跑 TUI,等就绪后自动注入任务 prompt。
   - 无 tmux:`start` 打印完整命令与 prompt,你在新终端运行。
+- **QuickTUI 可见**: 任务窗口就在当前 tmux session 里(`tmux list-windows` 可查),QuickTUI(tmux 移动端客户端)直接 attach 就能在手机上看到任务会话实时干活、可输入;多个并行任务 = 多个 `kb-*` window 同屏可见。
+- **看板状态视图**: `kanban web --port 8090` 起状态服务(HTML + JSON API),手机/浏览器同网段访问看卡片全貌;`kanban list` 命令行看简表。
 - 稳定 id 已由 kanban 自动记入卡片「讨论与决策」(`会话: kb-<task-id>`),无需 Agent 再记录。
 - **看板配置**(`kanban init` 自动生成模板,均在看板目录内,跟随看板、天然本地):
   - `kanban/.dsh-onevoke.yml` — 模型/审核/权限(见下)。

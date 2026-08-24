@@ -28,7 +28,15 @@ dsh --profile tui --dump-config
 
 ## 30 秒上手
 
-在 DSH 会话(TUI 或 Web)里直接说:
+**新项目接入看板**(装好 dsh-onevoke 后,在项目里说一句即可,Agent 自动执行):
+
+```
+在这个项目初始化看板
+```
+
+Agent 会: `kanban init`(建看板+模板)→(可选 `--agents` 写 AGENTS.md 入口)→ `kanban design init`(需求仓库)→ `kanban check` 校验。
+
+**开始任务**:
 
 ```
 走看板, 需求: 给登录页加重试按钮, 失败 3 次提示锁定 5 分钟
@@ -37,6 +45,9 @@ dsh --profile tui --dump-config
 Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调整计划)→ 你确认后
 `kanban new` 建卡 → `kanban pick` → `kanban start` 拉起独立会话 `kb-<task-id>` 干活
 (worktree + 分支 + 提交 + 子代理审核)→ 完成后请求你验收 → 确认后集成 done。
+
+**看任务**: 任务窗口在 tmux 里(`kb-<slug>`),QuickTUI 直接 attach 在手机上看实时干活、可输入;
+`kanban web --port 8090` 起看板状态页(HTML + JSON API,浏览器/手机同网段访问)。
 
 小需求一句话就够;完整流程、多模块/多游戏项目的需求管理见下文「design → kanban」。
 
