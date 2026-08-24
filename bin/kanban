@@ -405,6 +405,8 @@ BOARD_CONFIG_TEMPLATE = """# 看板配置 (kanban/.dsh-onevoke.yml) — 本看�
 #   mode: workspace-write
 # executor:                 # 任务执行器 (kanban start 默认用谁; --agent 可临时覆盖)
 #   agent: dsh              # dsh (DSH 会话, 默认) | claude | codex (外部 CLI, 自动开 tmux kb-* 窗口)
+# limits:                   # 并发限制
+#   max_concurrent_tasks: 2 # 最大同时任务数 (working 卡上限; 0=不限, 默认); 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖
 """
 
 BOARD_RULES_TEMPLATE = """# 本看板项目规则 (kanban/RULES.md)
@@ -1604,6 +1606,30 @@ def check_deps(root: Path, text: str, task_id: str) -> list:
     return missing
 
 
+def _check_concurrency(root: Path, cfg: dict) -> None:
+    """最大同时任务数: .dsh-onevoke.yml limits.max_concurrent_tasks (0=不限),
+    环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖. 达到上限时拒绝新 start."""
+    limit = int(os.environ.get("KANBAN_MAX_CONCURRENT_TASKS",
+                                (cfg.get("limits") or {}).get("max_concurrent_tasks", 0) or 0))
+    if limit <= 0:
+        return
+    # 统计 working 卡数
+    working = 0
+    wdir = root / "working"
+    if wdir.is_dir():
+        for entry in wdir.iterdir():
+            if entry.is_file() and entry.suffix == ".md":
+                working += 1
+            elif entry.is_dir() and (entry / "spec.md").is_file():
+                working += 1
+    if working >= limit:
+        raise KanbanError(
+            f"已达到并发上限: working 中有 {working} 张卡, max_concurrent_tasks={limit} "
+            f"(0 关闭限制; 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖配置); "
+            f"先完成或归档部分任务再启动。"
+        )
+
+
 def _tmux_session() -> str:
     out = subprocess.run(
         ["tmux", "display-message", "-p", "#S"],
@@ -1672,7 +1698,7 @@ def _parse_project_config():
         if section == "reviewers" and indent >= 4 and subsection:
             cfg.setdefault("reviewers", {}).setdefault(subsection, {})[key] = val
             continue
-        if indent == 2 and section in ("model", "plan", "review", "permission", "executor"):
+        if indent == 2 and section in ("model", "plan", "review", "permission", "executor", "limits"):
             cfg.setdefault(section, {})[key] = val
     return cfg
 
@@ -1740,6 +1766,7 @@ def cmd_start(args) -> int:
                 f"{ids[0]} 的前置任务未全部完成: " + ", ".join(missing)
                 + " (全部进入 done 后才能启动; 用户明确要求可加 --ignore-deps)"
             )
+    _check_concurrency(root, cfg)
 
     owner = os.environ.get("USER") or os.environ.get("USERNAME") or "agent"
     updated = re.sub(r"^- 负责人:.*$", f"- 负责人: {owner}", text, count=1, flags=re.M)

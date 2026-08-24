@@ -134,6 +134,8 @@ permission:               # 任务会话沙箱 (默认 danger-full-access)
   mode: workspace-write
 executor:                 # 任务执行器 (kanban start 默认; --agent 可临时覆盖)
   agent: dsh              # dsh (DSH 会话, 默认) | claude | codex (外部 CLI, 自动开 tmux kb-* 窗口)
+limits:                   # 并发限制
+  max_concurrent_tasks: 2 # 最大同时任务数 (working 卡上限; 0=不限, 默认); 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖
 ```
 
 > **推理级别 (reasoningEffort)**: DSH 在 `/model` 弹窗里选中模型后可以单独调推理级别

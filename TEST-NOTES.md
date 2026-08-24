@@ -141,6 +141,11 @@
 - 评估: dsh 无 os/cpu 限制、lib 纯 JS、sharp 有 darwin 版、Node 22 内置 zstd(create-session.mjs 用 node:zlib) → DSH 本身支持 macOS。
 - 修 3 处 GNU 依赖: ① onevoke-review 指纹 md5sum → `_fp()`(md5sum|md5 -q|shasum|git hash-object 降级),实测输出一致;② realpath → 无则 cd+pwd 拼接;③ install.sh `sed -i` → `tr -d '\r'` + 临时文件。bash 语法确认 bash 3.2 兼容(`[[ ]]`/`case`/`${var:-}` 均可用)。
 - README 平台分工表加 macOS 列: 全命令可用,需 brew install tmux + Xcode CLT python3 + Node 22+。
+
+### 5.18 并发限制 max_concurrent_tasks
+- 原版 onevoke 有 `check_concurrency`(KANBAN_MAX_CONCURRENT_TASKS 环境变量 + config max_concurrent_tasks),dsh-onevoke 缺 —— 补上。
+- 实现: `.dsh-onevoke.yml` 新 `limits.max_concurrent_tasks`(0=不限,默认),环境变量 `KANBAN_MAX_CONCURRENT_TASKS` 覆盖;`_check_concurrency` 统计 working 卡数(含大任务目录),达到上限拒绝 start;cmd_start 在依赖检查后调用;`_parse_project_config` 白名单加 limits。
+- 实测: 配置 limit=1,start A 成功(working=1)后 start B 被拒("已达到并发上限: working 中有 1 张卡, max_concurrent_tasks=1");KANBAN_MAX_CONCURRENT_TASKS=2 放行 B。配置已还原。
 - REQ_SPEC_ART 重写为通用模板(5 章): 设计系统令牌 / 设计分辨率与适配(多机型,比例区间+安全区,真实组件量几何,44px 触控)/ 产出文件夹与切图(素材分层,图集边车一致,reduced-motion)/ 交付物清单(逐条对照判定标准)/ 转看板。
 - REQ_TEMPLATE_ART 产出规范字段同步(设计基线/适配/效果图 HTML+无头截图/切图体积预算/通用 UI 复用/reduced-motion)。
 - 实测: design init 重新生成 art.md(删旧文件后),design new --type art 需求文件带新字段;原设计分辨率单点描述被"比例区间+安全区"替代(容器宽高比随视口变化,无单一比例)。

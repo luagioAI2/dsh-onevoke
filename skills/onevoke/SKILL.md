@@ -249,8 +249,12 @@ requirements/
     QA: { provider: deepseek-official, model: deepseek-v4-flash }
   permission:               # 任务会话沙箱 (默认 danger-full-access)
     mode: workspace-write
+  executor:                 # 任务执行器 (kanban start 默认; --agent 覆盖)
+    agent: dsh              # dsh (DSH 会话, 默认) | claude | codex (外部 CLI, 自动开 tmux kb-* 窗口)
+  limits:                   # 并发限制
+    max_concurrent_tasks: 2 # 最大同时任务数 (working 卡上限; 0=不限, 默认); 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖
   ```
-  模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。
+  模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。并发上限由 `limits.max_concurrent_tasks` 控制: 达到上限时 `kanban start` 拒绝新任务(0 或省略 = 不限)。
 - **启动者不再巡检该卡**(除非用户要求跟踪);执行 Agent 在独立会话直接向用户汇报。任务并行 = 多个这样的会话并行。
 - 执行 Agent 开工:先 `skill` 加载 onevoke 技能 → `kanban show <id>` 读卡 → 读 `kanban/RULES.md`(项目规则)与 `kanban/MEMORY.md`(跨任务记忆,若存在)→ 读 `requirements/specs/program.md`「技术架构」章节(若存在;实现应遵循其设计,有出入先说明再偏离)→ 读项目 `AGENTS.md`/规则。
 
