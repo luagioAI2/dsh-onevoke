@@ -26,7 +26,8 @@ echo "规则已安装(外部智能体): $AGENTS_RULES_DIR"
 # 2. CLI -> ~/.local/bin (POSIX/WSL) 与 $DSH_HOME/bin (跨平台, Windows pwsh 也可用)
 # 防御: Windows git autocrlf 可能让工作区脚本带 CRLF, 剥掉 \r 保证 shebang 可用
 for f in kanban onevoke-review onevoke-group create-session.mjs; do
-  sed -i 's/\r$//' "$HERE/bin/$f" 2>/dev/null || true
+  # 跨平台剥 CRLF (GNU/BSD sed 语法不同, 用临时文件)
+  tr -d '\r' < "$HERE/bin/$f" > "$HERE/bin/$f.tmp" && mv "$HERE/bin/$f.tmp" "$HERE/bin/$f"
 done
 install -m 0755 "$HERE/bin/kanban" "$BIN_DIR/kanban"
 install -m 0755 "$HERE/bin/onevoke-review" "$BIN_DIR/onevoke-review"

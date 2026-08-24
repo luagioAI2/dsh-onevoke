@@ -161,20 +161,23 @@ executor:                 # 任务执行器 (kanban start 默认; --agent 可临
 
 ---
 
-## 平台分工(Windows / WSL)
+## 平台分工(Windows / macOS / WSL)
 
-| 能力 | Windows(DSH Desktop / Harness Web) | WSL(原生 dsh) |
-|---|---|---|
-| 主会话 | ✅ Harness Web / DSH Desktop | ✅ dsh TUI |
-| 看板查看 | ✅ `kanban web`(浏览器)+ 读文件 | ✅ `kanban list/show` + `kanban web` |
-| 建卡/初始化 | ⚠️ 需真 Python(Store stub 不可用)才跑 `kanban` CLI | ✅ 全命令 |
-| 任务执行 | ❌(无 tmux/真 TTY) | ✅ `kanban start` 开 `kb-*` 窗口 |
-| QuickTUI 看任务 | ❌(tmux 是 POSIX 工具) | ✅ attach 可见 |
-| 审核 onevoke-review | ❌(bash 脚本,需 Git Bash) | ✅ 全流程 |
+| 能力 | macOS(原生) | WSL(Linux) | Windows(DSH Desktop / Harness Web) |
+|---|---|---|---|
+| 主会话 | ✅ dsh TUI / DSH Desktop | ✅ dsh TUI | ✅ Harness Web / DSH Desktop |
+| 看板查看 | ✅ `kanban list/show` + `kanban web` | ✅ 同左 | ✅ `kanban web`(浏览器)+ 读文件 |
+| 建卡/初始化 | ✅ 全命令(POSIX + python3) | ✅ 全命令 | ⚠️ 需真 Python(Store stub 不可用) |
+| 任务执行 | ✅ `kanban start`(需 `brew install tmux`) | ✅ `kanban start` | ❌(无 tmux/真 TTY) |
+| QuickTUI 看任务 | ✅ attach 可见 | ✅ attach 可见 | ❌(tmux 是 POSIX 工具) |
+| 审核 onevoke-review | ✅ 全流程 | ✅ 全流程 | ❌(bash 脚本,需 Git Bash) |
 
-**默认用法**:Windows 上用 Harness Web 做**主会话与指挥**(说需求、看状态),WSL 负责**任务执行
-与审核**(kanban start / tmux / QuickTUI)。跨平台命令 `kanban` 设计上走 WSL 的 python3 与
-POSIX 工具链;Windows 侧仅当装了真 Python 且用 Git Bash 时才可跑部分 CLI。
+**macOS 注意**: 需安装 `tmux`(`brew install tmux`)、`python3`(Xcode CLT 自带)、Node 22+
+(会话预建用内置 zstd)。onevoke-review 已兼容 macOS(无 md5sum/realpath 时自动降级)。
+
+**默认用法**: Windows 上用 Harness Web 做**主会话与指挥**(说需求、看状态);macOS/WSL 负责
+**任务执行与审核**(kanban start / tmux / QuickTUI)。跨平台命令 `kanban` 设计上走 POSIX
+工具链;Windows 侧仅当装了真 Python 且用 Git Bash 时才可跑部分 CLI。
 
 ## 已知限制
 

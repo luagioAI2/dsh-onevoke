@@ -64,8 +64,16 @@ if [[ -n "$DIRTY" ]]; then
   echo "$DIRTY" | head -20 >&2
 fi
 
+# 跨平台 md5 (Linux/macOS/Git Bash): md5sum | md5 | shasum
+_fp() {
+  if command -v md5sum >/dev/null 2>&1; then md5sum | cut -d' ' -f1
+  elif command -v md5 >/dev/null 2>&1; then md5 -q
+  elif command -v shasum >/dev/null 2>&1; then shasum | cut -d' ' -f1
+  else git hash-object --stdin; fi
+}
+
 # 只读审核前指纹 (跟踪文件状态); 结束时必须一致
-BEFORE_FINGERPRINT=$(git status --porcelain=v1 | md5sum | cut -d' ' -f1)
+BEFORE_FINGERPRINT=$(git status --porcelain=v1 | _fp)
 readonly BEFORE_FINGERPRINT
 
 # ── 证据收集 ───────────────────────────────────────────────────────────────
@@ -83,7 +91,12 @@ git show -s --format="%H%n%an%n%ad%n%s" --date=iso "$COMMIT_SHA" > "$EVIDENCE_DI
 
 TASK_ABS="$TASK_INPUT"
 if [[ -f "$TASK_INPUT" ]]; then
-  TASK_ABS=$(realpath "$TASK_INPUT")
+  # 跨平台 realpath: macOS 旧版无 realpath, 用 python 解析 (kanban 同款工具链)
+  if command -v realpath >/dev/null 2>&1; then
+    TASK_ABS=$(realpath "$TASK_INPUT")
+  else
+    TASK_ABS=$(cd "$(dirname "$TASK_INPUT")" && pwd)/$(basename "$TASK_INPUT")
+  fi
 fi
 CONTEXT_TEXT="${REVIEW_CONTEXT:-None provided.}"
 
@@ -234,7 +247,7 @@ PROMPT
 echo "EVIDENCE_DIR=$EVIDENCE_DIR" >&2
 
 # ── 审核后门禁: worktree 必须未被改动 ────────────────────────────────────
-AFTER_FINGERPRINT=$(git status --porcelain=v1 | md5sum | cut -d' ' -f1)
+AFTER_FINGERPRINT=$(git status --porcelain=v1 | _fp)
 if [[ "$BEFORE_FINGERPRINT" != "$AFTER_FINGERPRINT" ]]; then
   fail "审核期间 worktree 被改动, 审核作废 (指纹不一致)"
 fi
