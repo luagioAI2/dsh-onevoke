@@ -1695,7 +1695,8 @@ def _parse_project_config():
         m = re.match(r"([A-Za-z_]+):\s*(.*)$", line.strip())
         if m is None:
             continue
-        key, val = m.group(1), m.group(2).strip().strip("\"'")
+        val_raw = m.group(2).split("#", 1)[0]  # 去掉行内注释 (如 "2 # 最大同时任务数..."), 否则 int() 解析崩溃
+        key, val = m.group(1), val_raw.strip().strip("\"'")
         if indent == 0:
             section = key
             subsection = None
