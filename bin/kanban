@@ -2049,18 +2049,17 @@ def cmd_start(args) -> int:
         print(f"  {launch_cmd}")
         print(f"然后粘贴: {prompt}")
         return 1
-    # 用「会话:窗口索引」定位 (裸窗口名会被 tmux 当会话名解析)
+    # 用「会话:窗口名」定位 tmux 窗口 (多窗口下索引易错位; tmux 窗口名可直接作 target)
     session = _tmux_session()
-    idx = _tmux_window_index(win)
-    if not session or idx is None:
+    if not session or _tmux_window_index(win) is None:
         print(f"窗口 [{win}] 未创建成功或已退出 (dsh 可能启动失败); 请手动运行:")
         print(f"  {launch_cmd}")
         print(f"然后粘贴: {prompt}")
         return 1
-    target = f"{session}:{idx}"
-    # 等 TUI 就绪 (输入提示 "dsh >" 出现) 再注入, 否则按键会在 TUI 启动阶段丢失
+    target = f"{session}:{win}"
+    # 等 TUI 就绪 (输入提示 "dsh >" 出现) 再注入, 否则按键会在 TUI 启动阶段丢失; 放宽到最多 ~80s
     ready = False
-    for _ in range(25):  # 最多 ~50s
+    for _ in range(40):
         time.sleep(2)
         cap = subprocess.run(
             ["tmux", "capture-pane", "-t", target, "-p"],
