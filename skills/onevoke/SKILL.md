@@ -64,6 +64,10 @@ kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所�
   设 `executor: {agent: claude|codex}` 把默认执行器固定为外部 CLI(如团队统一用 codex)。
 - **入口**: 项目 `AGENTS.md`(kanban init --agents 写入)是通用入口,任何智能体读它
   就知道规则位置(`~/.agents/skills/onevoke/SKILL.md`)与 kanban 指挥方式。
+- **起管理会话**: `kanban session [name] [--agent dsh|codex|claude]` —— 一条命令用 tmux 起/入
+  管理会话(默认 `dsh --profile tui`, 也可 `codex`/`claude`),启动前自动 `cd` 到项目根;该 tmux 会话
+  已存在则 attach。会话里按"管理者模式"驱动:`design new`(记录需求)→ `design break`(AI 拆细卡)→
+  `kanban auto`(按依赖派活);被问进度才 `kanban list/usage`。
 - **流程**(以 Claude 为例,Codex 同理):
   1. 读规则 → `kanban new` 建卡(填契约)→ `kanban pick`;
   2. `kanban start --agent claude <id>` 把卡迁入 `working/` 并开窗口跑 `claude -p <prompt>`,

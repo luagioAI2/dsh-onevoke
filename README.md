@@ -109,6 +109,9 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 | `kanban web [--port]` | 看板状态服务(HTML + JSON API) |
 | `kanban group <gid>` / `onevoke-group <gid>` | 任务组依赖状态 / 自动编排 |
 | `kanban auto [--max N] [--interval S] [--gate done\|work] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']` | **内置依赖自动调度器**: 前置任务放行且本任务未启动时自动 `pick+start`;`--max` 并发上限(默认取 `limits.max_concurrent_tasks`),`--interval` 轮询秒,Ctrl-C 停止 |
+| `kanban session [name] [--agent dsh\|codex\|claude]` | **一条命令起/入管理会话**: 以 tmux 会话(名=name,默认取 cwd 目录名) 跑 agent CLI — `dsh`(默认,`dsh --profile tui`)/`codex`/`claude`; 已存在该会话则 attach,否则新建并启动;启动前自动 `cd` 到项目根 |
+
+> `kanban session` 是**管理模式入口**: 起一个指挥会话 (tmux + 你选的 CLI)。在会话里用自然语言指挥 agent: 记录需求(`design new`)、AI 拆细卡(`design break`)、按依赖自动开始(`kanban auto`)。外部 CLI(`claude`/`codex`)需本机已装已登录,并依赖项目根 `AGENTS.md`(`kanban init --agents`)与 `~/.agents/skills/onevoke`(install.sh) 才能读到 onevoke 流程。
 
 `kanban auto` 的验收门禁 `--gate`:
 - **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `结果: completed` = 到达等待验收)。这样用户不点验收(如夜间睡觉)流水线也继续;**待验收任务不再占用并发位**。
