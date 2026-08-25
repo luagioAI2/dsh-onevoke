@@ -404,10 +404,10 @@ BOARD_CONFIG_TEMPLATE = """# 看板配置 (kanban/.dsh-onevoke.yml) — 本看�
 #   provider: deepseek-official
 #   model: deepseek-v4-flash
 #   reasoningEffort: max
-# plan:                     # 规划模型 (主会话建议, 手动 /model)
-#   provider: deepseek-official
-#   model: deepseek-v4-flash
-#   reasoningEffort: high
+plan:                     # 规划模型 (指挥/规划会话; kanban session 自动 /model 应用)
+  provider: deepseek-official
+  model: deepseek-v4-flash
+  reasoningEffort: high
 # review:                   # 审核通用模型
 #   provider: deepseek-official
 #   model: deepseek-v4-flash
