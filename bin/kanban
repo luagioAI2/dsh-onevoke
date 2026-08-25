@@ -2497,9 +2497,29 @@ def cmd_session(args) -> int:
     if has.returncode == 0:
         print(f"attach 到已有 tmux 会话 [{name}] ({agent})...")
         subprocess.run(["tmux", "attach", "-t", name])
-    else:
-        print(f"新建 tmux 会话 [{name}], 运行 {agent}...")
-        subprocess.run(["tmux", "new-session", "-s", name] + cli)
+        return 0
+    print(f"新建 tmux 会话 [{name}], 运行 {agent}...")
+    subprocess.run(["tmux", "new-session", "-d", "-s", name] + cli)
+    # 若项目配置了 plan 模型, 等 DSH TUI 就绪后自动切过去 (指挥/规划会话用 plan 模型)
+    cfg = _parse_project_config()
+    plan = (cfg.get("plan") or {})
+    if agent == "dsh" and plan.get("provider") and plan.get("model"):
+        try:
+            target = f"{name}:0"
+            for _ in range(25):
+                time.sleep(2)
+                cap = subprocess.run(["tmux", "capture-pane", "-t", target, "-p"],
+                                     capture_output=True, text=True, timeout=10)
+                if cap.returncode == 0 and ("dsh >" in cap.stdout or "dsh>" in cap.stdout):
+                    break
+            subprocess.run(["tmux", "send-keys", "-t", target, "-l", f"/model {plan['provider']}/{plan['model']}"])
+            subprocess.run(["tmux", "send-keys", "-t", target, "Enter"])
+            time.sleep(3)
+            print(f"已自动应用 plan 模型: {plan['provider']}/{plan['model']}")
+        except Exception as exc:
+            print(f"自动切 plan 模型失败 (可手动 /model): {exc}")
+    print(f"attach 到会话 [{name}]... (QuickTUI 可见)")
+    subprocess.run(["tmux", "attach", "-t", name])
     return 0
 
 
