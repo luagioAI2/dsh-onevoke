@@ -768,8 +768,9 @@ def _break_ai(target: str, req) -> int:
         "你是需求拆解专家。把下面的需求拆成若干**互不重叠、可独立交付**的子任务, "
         "每个小到一次改动即可完成且验收聚焦; 基于需求的实际内容决定拆几张(通常3-8张), 不要机械按验收项条数。\n\n"
         f"需求标题: {title}\n需求描述: {goal}\n验收标准:\n{acc}\n范围(不做): {scope or 'N/A'}\n\n"
-        "返回严格 JSON 数组, 每个元素: {\"title\": \"子任务标题\", \"description\": \"子任务描述\", "
-        "\"acceptance\": [\"验收项1\", \"验收项2\"]}。只输出 JSON, 不要其他文字。"
+        "返回严格 JSON 数组, 每个元素: {\"slug\": \"英文小写连字符标识(如 stats-query-api)\", "
+        "\"title\": \"子任务标题\", \"description\": \"子任务描述\", "
+        "\"acceptance\": [\"验收项1\", \"验收项2\"]}。slug 必须只含小写字母/数字/连字符且能反映该子任务。只输出 JSON, 不要其他文字。"
     )
     import tempfile
     try:
@@ -782,7 +783,8 @@ def _break_ai(target: str, req) -> int:
     if not arr:
         raise KanbanError(f"AI 未返回有效的 JSON 拆解:\n{r.stdout[:300]}")
     root = board_root()
-    base_slug = _sanitize_slug(module or title)
+    base_slug = _sanitize_slug(module) or "part"
+    used = set()
     task_ids = []
     for idx, item in enumerate(arr):
         if not isinstance(item, dict):
@@ -792,7 +794,12 @@ def _break_ai(target: str, req) -> int:
         sub_acc = item.get("acceptance") or []
         if isinstance(sub_acc, str):
             sub_acc = [sub_acc]
-        slug = f"{base_slug}-ai{idx + 1}"
+        slug = _sanitize_slug(item.get("slug") or sub_title)
+        if slug in ("req", "") or slug in used:
+            slug = f"{base_slug}-{idx + 1}"
+        while slug in used:
+            slug = f"{slug}-{idx + 1}"
+        used.add(slug)
         task_id = f"{today()}-{slug}-task"
         if find_card_any(root, task_id)[1] is not None:
             raise KanbanError(f"{task_id} 已存在, 请先处理或重试")
