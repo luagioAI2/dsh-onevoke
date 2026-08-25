@@ -739,6 +739,91 @@ def _sanitize_slug(s: str) -> str:
     return s or "req"
 
 
+def _extract_json_array(text: str):
+    """从 LLM 输出里提取 JSON 数组 (容忍 ```json 围栏/前后杂文本)."""
+    if not text:
+        return None
+    text = re.sub(r"```(?:json)?", "", text).strip()
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        arr = json.loads(text[start:end + 1])
+        return arr if isinstance(arr, list) and arr else None
+    except Exception:
+        return None
+
+
+def _break_ai(target: str, req) -> int:
+    """AI 拆解: 用 DSH plan 模型 (headless) 语义分解需求, 再把每个子项落到看板卡."""
+    title, fields = req["title"], req["fields"]
+    goal = fields.get("期望") or ""
+    acc = fields.get("验收") or ""
+    scope = fields.get("范围") or ""
+    module = fields.get("模块", "")
+    type_label = REQ_TYPE_LABELS.get(fields.get("类型", ""), fields.get("类型", ""))
+    prompt = (
+        "你是需求拆解专家。把下面的需求拆成若干**互不重叠、可独立交付**的子任务, "
+        "每个小到一次改动即可完成且验收聚焦; 基于需求的实际内容决定拆几张(通常3-8张), 不要机械按验收项条数。\n\n"
+        f"需求标题: {title}\n需求描述: {goal}\n验收标准:\n{acc}\n范围(不做): {scope or 'N/A'}\n\n"
+        "返回严格 JSON 数组, 每个元素: {\"title\": \"子任务标题\", \"description\": \"子任务描述\", "
+        "\"acceptance\": [\"验收项1\", \"验收项2\"]}。只输出 JSON, 不要其他文字。"
+    )
+    import tempfile
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            r = subprocess.run(["dsh", "--profile", "headless", prompt], cwd=td,
+                               capture_output=True, text=True, timeout=180)
+    except Exception as exc:
+        raise KanbanError(f"AI 拆解失败 (dsh headless 调用): {exc}")
+    arr = _extract_json_array(r.stdout)
+    if not arr:
+        raise KanbanError(f"AI 未返回有效的 JSON 拆解:\n{r.stdout[:300]}")
+    root = board_root()
+    base_slug = _sanitize_slug(module or title)
+    task_ids = []
+    for idx, item in enumerate(arr):
+        if not isinstance(item, dict):
+            continue
+        sub_title = item.get("title") or f"{title} · 子任务{idx + 1}"
+        sub_desc = item.get("description") or goal
+        sub_acc = item.get("acceptance") or []
+        if isinstance(sub_acc, str):
+            sub_acc = [sub_acc]
+        slug = f"{base_slug}-ai{idx + 1}"
+        task_id = f"{today()}-{slug}-task"
+        if find_card_any(root, task_id)[1] is not None:
+            raise KanbanError(f"{task_id} 已存在, 请先处理或重试")
+        text = template_card(sub_title, "feature")
+        text = text.replace("- 类型: Feature", f"- 类型: Feature\n- 需求类型: {type_label}\n- 模块: {module}")
+        text = text.replace("<填写>\n\n## 用户决策", f"{sub_desc}\n\n## 用户决策")
+        text = text.replace("## 用户决策\n\nN/A", "## 用户决策\n\n按需求拆解执行 (父需求见 讨论与决策)。")
+        text = text.replace("## 预期成果\n\n<填写>", f"## 预期成果\n\n{sub_desc}")
+        text = text.replace("- [ ] <填写>", "\n".join(f"- [ ] {a}" for a in sub_acc))
+        if fields.get("红线"):
+            text = text.replace("## 红线\n\n- <禁止事项: 不可改的模块/数据/环境, 触发即停下报告; 无则 N/A>",
+                                f"## 红线\n\n{fields['红线']}")
+        text = text.replace("## 不在本轮范围\n\n- <填写>", f"## 不在本轮范围\n\n{scope}")
+        text = text.replace("## 讨论与决策\n",
+                            f"## 讨论与决策\n\n需求来源: {target} (AI 拆解)\n父需求: {target}\n", 1)
+        (root / "backlog" / f"{task_id}.md").write_text(text, encoding="utf-8")
+        task_ids.append(task_id)
+    req_file = req["path"]
+    req_text = req_file.read_text(encoding="utf-8")
+    if "拆解:" in req_text:
+        req_text = re.sub(r"^- 拆解:.*$", f"- 拆解: {', '.join(task_ids)}", req_text, count=1, flags=re.M)
+    else:
+        req_text = re.sub(r"^- 优先级:.*$", lambda m: m.group(0) + f"\n- 拆解: {', '.join(task_ids)}",
+                          req_text, count=1, flags=re.M)
+    req_file.write_text(req_text, encoding="utf-8")
+    print(f"AI 拆解 {target} -> {len(task_ids)} 张看板卡 (子任务按语义划分):")
+    for tid in task_ids:
+        print(f"  - {tid}")
+    print("子卡引用父需求; 父需求已记录拆解任务.")
+    return 0
+
+
 def _design_break(args) -> int:
     """kanban design break <REQ-ID|路径> [--granularity fine|medium|coarse] [--into N]
     把一个需求细粒度拆解成多张 kanban 任务卡 (backlog), 粒度可配:
@@ -747,11 +832,13 @@ def _design_break(args) -> int:
       fine         每个验收项一张卡 (最细)
       --into N     指定张数
     子卡引用父需求 (需求来源/父需求), 父需求记录拆解出的任务 id."""
-    granularity, into, rest = "coarse", 0, []
+    granularity, into, rest, ai = "coarse", 0, [], False
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--granularity":
+        if a == "--ai":
+            ai = True
+        elif a == "--granularity":
             i += 1
             if i >= len(args):
                 raise KanbanError("--granularity 需要 fine|medium|coarse")
@@ -786,6 +873,8 @@ def _design_break(args) -> int:
     else:
         raise KanbanError("无法解析需求")
     title, fields = req["title"], req["fields"]
+    if ai:
+        return _break_ai(target, req)
     goal = fields.get("期望") or ""
     acc = fields.get("验收") or ""
     scope = fields.get("范围") or ""
