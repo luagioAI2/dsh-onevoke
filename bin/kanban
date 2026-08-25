@@ -2498,70 +2498,6 @@ def _upsert_section(text: str, section: str, body: str) -> str:
     return text.rstrip("\n") + "\n\n" + block
 
 
-REVIEW_ROLE_RE = re.compile(r"「?(PM|QA|CSA|Hacker)」?阶段|(PM|QA|CSA|Hacker)\s*只读|(PM|QA|CSA|Hacker)\s*审查")
-
-
-def _review_usage(jf: str):
-    """按角色 (PM/QA/CSA/Hacker) 切分 review 子代理的 token 用量 (近似).
-    从会话流里找 subagent 工具调用 (arguments 含审核角色), 按调用时间窗划分 assistant/message usage."""
-    role_hits = ["PM", "QA", "CSA", "Hacker"]
-    subs = []  # [(time, role)]
-    usage = []  # [(time, in, out, reason)]
-    try:
-        import zstandard as zstd
-        f = open(jf, "rb")
-        r = zstd.ZstdDecompressor().stream_reader(f)
-    except Exception:
-        return []
-    try:
-        buf = b""
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                if not line.strip():
-                    continue
-                try:
-                    o = json.loads(line.decode("utf-8", "replace"))
-                except Exception:
-                    continue
-                if not isinstance(o, dict):
-                    continue
-                t = o.get("type")
-                d = o.get("data")
-                tt = o.get("time") or (d.get("time") if isinstance(d, dict) else None)
-                if t == "tool/call" and isinstance(d, dict) and d.get("name") == "subagent":
-                    args = d.get("arguments") or ""
-                    role = ""
-                    for rl in role_hits:
-                        if re.search(rf"\b{rl}\b", args):
-                            role = rl
-                            break
-                    if role and isinstance(tt, (int, float)):
-                        subs.append((tt, role))
-                elif t == "assistant/message" and isinstance(d, dict) and isinstance(tt, (int, float)):
-                    u = d.get("usage") or {}
-                    usage.append((tt, int(u.get("inputTokens") or 0), int(u.get("outputTokens") or 0), int(u.get("reasoningTokens") or 0)))
-    finally:
-        r.close()
-    subs.sort(key=lambda x: x[0])
-    result = []
-    for i, (t0, role) in enumerate(subs):
-        t1 = subs[i + 1][0] if i + 1 < len(subs) else None
-        inp = out = reason = msg = 0
-        for ut, i0, o0, r0 in usage:
-            if ut >= t0 and (t1 is None or ut < t1):
-                inp += i0
-                out += o0
-                reason += r0
-                msg += 1
-        result.append((role, inp, out, reason, msg))
-    return result
-
-
 def cmd_usage(args) -> int:
     """kanban usage [task-id ...] [--write] — 每个任务的 token 用量与耗时 (读 DSH 会话日志 session.jsonl.zstd).
     无参列出全部卡; 可传一个或多个 task-id. --write 把指标写进任务卡的「用量指标」章节.
@@ -2650,17 +2586,10 @@ def cmd_usage(args) -> int:
                 continue  # 无会话/无解码, 不写
             _, entry = find_card(root, tid)
             text = read_card(entry)
-            jf = os.path.join(sess_parent, f"kb-{tid}", "session.jsonl.zstd")
             body = (f"- 耗时: {wall}s\n"
                     f"- input: {i} / output: {o} / reasoning: {r} / cache: {c/1e6:.1f}M tokens\n"
                     f"- 总计: {total} tokens; 消息 {m} 条, 工具调用 {t} 次\n"
                     f"- 详情: `kanban usage {tid}`")
-            rev = _review_usage(jf) if os.path.isfile(jf) else []
-            if rev:
-                lines = [f"- 审核按角色 (近似):"]
-                for role, ri, ro, rr, rm in rev:
-                    lines.append(f"  - {role}: in {ri} / out {ro} / reason {rr} / 消息 {rm}")
-                body += "\n" + "\n".join(lines)
             text2 = _upsert_section(text, "用量指标", body)
             if text2 != text:
                 write_entry(entry, text2)
