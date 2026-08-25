@@ -59,7 +59,7 @@ USAGE = """用法:
   kanban start [--no-window] [--ignore-deps] [--agent dsh|claude|codex] [task-id]
                                            todo -> working; 默认拉 dsh 会话; --agent claude|codex
                                            自动开 tmux 窗口跑对应 CLI (QuickTUI 可见, 校验依赖)
-  kanban resume <task-id>                  恢复卡片记录的会话 (崩溃/中断后续跑)
+  kanban resume [--all | <task-id>]     恢复卡片记录的会话 (--all/无参=全部 working 卡; 崩溃/中断后续跑)
   kanban move <task-id> <todo|working|done|archived|trash>
   kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
   kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
@@ -1708,35 +1708,60 @@ def review_level(text: str) -> str:
 
 
 def cmd_resume(args) -> int:
-    """kanban resume <task-id> — 恢复卡片记录的会话 (崩溃/中断后续跑)."""
-    if not args:
-        raise KanbanError("kanban resume 需要 <task-id>")
+    """kanban resume [--all | <task-id> ...] — 恢复卡片记录的会话 (崩溃/中断后续跑).
+    --all: 恢复全部 working 卡 (未在运行的会话); 默认等价 --all (无参数时)."""
+    all_flag = "--all" in args
+    ids = [a for a in args if a != "--all"]
     root = board_root()
-    state, entry = find_card(root, args[0])
-    text = read_card(entry)
-    m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
-    if not m:
-        raise KanbanError(f"{args[0]} 卡片没有会话记录 (可能是手动启动的任务, 没有稳定会话 id)")
-    session_id = m.group(1).strip()
-    dsh = resolve_dsh()
-    if not dsh:
-        print(f"未找到 dsh CLI。手动恢复:")
-        print(f"  dsh --profile tui --resume={session_id}")
+    if all_flag or not ids:
+        # 无参数或 --all: 收集所有 working 卡
+        ids = [entry_id(e) for s, e in iter_entries(root) if s == "working"]
+    if not ids:
+        print("没有可恢复的任务 (working 为空或未指定 task-id)")
         return 0
-    launch_cmd = f"{' '.join(dsh)} --profile tui --resume={session_id}"
-    if os.environ.get("TMUX") and shutil.which("tmux"):
-        win = f"kb-{entry_id(entry).split('-', 1)[1].rsplit('-task', 1)[0]}-r"
-        shell_cmd = f"bash -lc '{launch_cmd}; echo; echo [会话已退出, 窗口保持打开]; exec bash'"
-        r = subprocess.run(
-            ["tmux", "new-window", "-d", "-n", win, shell_cmd],
-            capture_output=True, text=True, check=False, timeout=15,
-        )
-        if r.returncode == 0:
-            print(f"已在 tmux window [{win}] 恢复会话: {session_id}")
-            return 0
-    print(f"请在新终端恢复任务会话:")
-    print(f"  {launch_cmd}")
-    print("然后粘贴: 继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。")
+    restored, skipped = 0, 0
+    for tid in ids:
+        try:
+            state, entry = find_card(root, tid)
+        except KanbanError as exc:
+            print(f"跳过 {tid}: {exc}")
+            skipped += 1
+            continue
+        text = read_card(entry)
+        m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+        if not m:
+            print(f"跳过 {tid}: 卡片没有会话记录 (可能是手动启动的任务)")
+            skipped += 1
+            continue
+        session_id = m.group(1).strip()
+        if _session_running(session_id):
+            print(f"跳过 {tid}: 会话已在运行 ({session_id})")
+            skipped += 1
+            continue
+        dsh = resolve_dsh()
+        if not dsh:
+            print(f"未找到 dsh CLI。手动恢复:")
+            print(f"  dsh --profile tui --resume={session_id}")
+            skipped += 1
+            continue
+        launch_cmd = f"{' '.join(dsh)} --profile tui --resume={session_id}"
+        host = _tmux_host_session()
+        if host:
+            win = f"kb-{entry_id(entry).split('-', 1)[1].rsplit('-task', 1)[0]}-r"
+            shell_cmd = f"bash -lc '{launch_cmd}; echo; echo [会话已退出, 窗口保持打开]; exec bash'"
+            r = subprocess.run(
+                ["tmux", "new-window", "-t", host, "-d", "-n", win, shell_cmd],
+                capture_output=True, text=True, check=False, timeout=15,
+            )
+            if r.returncode == 0:
+                print(f"已在 tmux window [{win}] 恢复会话: {session_id}")
+                restored += 1
+                continue
+        print(f"请在新终端恢复任务会话:")
+        print(f"  {launch_cmd}")
+        print("然后粘贴: 继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。")
+        skipped += 1
+    print(f"resume 完成: 恢复 {restored}, 跳过 {skipped}")
     return 0
 
 
@@ -1783,6 +1808,48 @@ def _tmux_session() -> str:
         capture_output=True, text=True, check=False, timeout=10,
     )
     return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def _tmux_host_session() -> str:
+    """返回可建任务窗口的目标 tmux 会话名, 无则新建并返回其名.
+    优先级: 当前 TMUX 会话 > 项目目录名会话 (如 task-vault) > 新建同名会话.
+    让 resume/auto 在非 tmux 环境 (如 WSL 普通 bash) 也能把任务窗口开进管理会话."""
+    if shutil.which("tmux") is None:
+        return ""
+    cur = os.environ.get("TMUX", "")
+    if cur:
+        out = subprocess.run(
+            ["tmux", "display-message", "-p", "#S"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    try:
+        name = re.sub(r"[^A-Za-z0-9_.-]+", "-", board_root().parent.name) or "dsh-session"
+    except Exception:
+        name = "dsh-session"
+    r = subprocess.run(["tmux", "has-session", "-t", name],
+                       capture_output=True, check=False, timeout=10)
+    if r.returncode == 0:
+        return name
+    r = subprocess.run(["tmux", "new-session", "-d", "-s", name],
+                       capture_output=True, text=True, check=False, timeout=15)
+    return name if r.returncode == 0 else ""
+
+
+def _session_running(session_id: str) -> bool:
+    """kb-<task-id> 会话是否有 dsh TUI 进程在跑 (跨 tmux 窗口, 冷启动检测用)."""
+    if not session_id:
+        return False
+    try:
+        out = subprocess.run(["ps", "-eo", "args="],
+                             capture_output=True, text=True, check=False, timeout=10)
+        for line in out.stdout.splitlines():
+            if session_id in line and ("--resume" in line or "--profile" in line):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _tmux_window_index(win: str):
@@ -2631,6 +2698,22 @@ def cmd_auto(args) -> int:
             slugs = [tid.split("-", 1)[1].rsplit("-task", 1)[0]
                      for s, e in iter_entries(root) if s in ("backlog", "todo")]
         wc = _count_working()
+        # 每次轮询先扫描全部 working 卡: 会话中断(有会话记录但无 dsh 进程)自动恢复
+        for s, e in iter_entries(root):
+            if s != "working":
+                continue
+            tid = entry_id(e)
+            try:
+                text = read_card(e)
+                m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+                if m and not _session_running(m.group(1).strip()):
+                    print(f"[{now()}] 恢复中断会话 {tid} ({m.group(1)})")
+                    try:
+                        cmd_resume([tid])
+                    except KanbanError as exc:
+                        print(f"[{now()}] resume {tid} 失败: {exc}")
+            except Exception as exc:
+                print(f"[{now()}] 检查 {tid} 会话状态失败: {exc}")
         for slug in slugs:
             tid = slug_to_tid.get(slug)
             if not tid:
