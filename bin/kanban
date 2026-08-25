@@ -64,9 +64,10 @@ USAGE = """用法:
   kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
   kanban upgrade <task-id>                 小任务 -> 大任务 (仅 backlog/working)
   kanban check                             列出全部无效入口, 有则非零退出
-  kanban auto [--max N] [--interval S] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']
-                                            内置依赖调度器: 依赖全部 done(已验收) 且未启动时自动 pick+start;
-                                            并发上限 --max(默认 limits.max_concurrent_tasks), 轮询 --interval; Ctrl-C 停止"""
+  kanban auto [--max N] [--interval S] [--gate done|work] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']
+                                            内置依赖调度器: 前置任务"放行"且本任务未启动时自动 pick+start;
+                                            --gate work(默认): 前置工作已完成(done 或 working 且结果completed=待验收)即放行下一个;
+                                            --gate done: 前置进入 done(已确认验收) 才放行; --max 并发上限, --interval 轮询秒; Ctrl-C 停止"""
 
 
 class KanbanError(Exception):
@@ -2317,12 +2318,15 @@ def cmd_check(args) -> int:
 
 
 def cmd_auto(args) -> int:
-    """kanban auto [--max N] [--interval S] [--deps 'slug=d1,d2;slug2=d3'] [--chain 'a,b,c']
-    内置依赖调度器 (替代外部 orchestrator): 循环检查看板, 某任务依赖全部 done 且未启动时
-    自动 pick+start; 并发上限 --max (默认取 limits.max_concurrent_tasks, 0=不限); 轮询 --interval 秒.
-    门禁: 只有依赖任务进入 done(=已验收) 才开始本任务, 天然按验收 gating.
+    """kanban auto [--max N] [--interval S] [--gate done|work] [--deps 'slug=d1,d2;slug2=d3'] [--chain 'a,b,c']
+    内置依赖调度器 (替代外部 orchestrator): 循环检查看板, 某任务依赖满足且未启动时自动 pick+start;
+    并发上限 --max (默认取 limits.max_concurrent_tasks, 0=不限); 轮询 --interval 秒; Ctrl-C 停止.
+    验收门禁 --gate:
+      work (默认) 前置任务「工作已完成」即放行下一个 — done 或 (working 且 结果: completed, 即到达等待验收),
+                  这样用户不点验收(如夜间睡觉)流水线也继续;
+      done  前置任务必须进入 done(=已确认验收) 才开下一个 (严格按验收).
     依赖来源优先级: --deps 显式 map(slug=dep1,dep2;...) > --chain 线性(每个依赖之前所有) > 读卡片「前置任务」."""
-    max_n, interval = 0, 15
+    max_n, interval, gate = 0, 15, "work"
     deps_map, chain = {}, []
     rest = []
     i = 0
@@ -2338,6 +2342,13 @@ def cmd_auto(args) -> int:
             if i >= len(args):
                 raise KanbanError("--interval 需要数字")
             interval = int(args[i])
+        elif a == "--gate":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--gate 需要 done|work")
+            gate = args[i]
+            if gate not in ("done", "work"):
+                raise KanbanError("--gate 只能是 done|work")
         elif a == "--deps":
             i += 1
             if i >= len(args):
@@ -2379,11 +2390,33 @@ def cmd_auto(args) -> int:
         st, _ = find_card_any(root, tid)
         return st or ""
 
+    def _ready(slug: str) -> bool:
+        """验收门禁: 前置任务是否"已放行"下一个.
+        work: done 或 (working 且 结果: completed = 到达等待验收) 即放行;
+        done: 必须 done(=已确认验收)."""
+        st = _state(slug)
+        if st == "done":
+            return True
+        if gate == "work" and st == "working":
+            tid = slug_to_tid.get(slug)
+            if tid:
+                _, entry = find_card_any(root, tid)
+                if entry and re.search(r"^- 结果:\s*completed\s*$", read_card(entry), re.M):
+                    return True
+        return False
+
     def _count_working() -> int:
-        return sum(1 for s, e in iter_entries(root) if s == "working")
+        n = 0
+        for s, e in iter_entries(root):
+            if s != "working":
+                continue
+            if gate == "work" and re.search(r"^- 结果:\s*completed\s*$", read_card(e), re.M):
+                continue  # --gate work: 待验收(工作已完成)不再占并发位, 让链条继续
+            n += 1
+        return n
 
     print(f"auto-scheduler: deps={bool(deps_map)} chain={bool(chain)} 卡片前置={(not deps_map and not chain)} "
-          f"max={max_n or '不限'} interval={interval}s")
+          f"max={max_n or '不限'} interval={interval}s gate={gate}")
     while True:
         if deps_map:
             slugs = list(deps_map.keys())
@@ -2414,7 +2447,7 @@ def cmd_auto(args) -> int:
             dep_ok = True
             for d in dep_slugs:
                 d_slug = d.split("-", 1)[1].rsplit("-task", 1)[0] if d.endswith("-task") else d
-                if _state(d_slug) != "done":
+                if not _ready(d_slug):
                     dep_ok = False
                     break
             if not dep_ok:
