@@ -2482,9 +2482,27 @@ def cmd_auto(args) -> int:
         time.sleep(interval)
 
 
+def _upsert_section(text: str, section: str, body: str) -> str:
+    """在卡片文本里 upsert 一个非必填章节 (在 ## 完成总结 之前插入, 幂等替换)."""
+    marker = f"## {section}\n"
+    block = marker + body.rstrip("\n") + "\n"
+    if marker in text:
+        # 替换已有章节: 从 marker 到下一个 "## " (或末尾)
+        head, rest = text.split(marker, 1)
+        tail = re.split(r"\n## ", rest, 1)
+        tail_part = "\n## " + tail[1] if len(tail) > 1 else ""
+        return head + block + tail_part.lstrip("\n")
+    # 插入到 ## 完成总结 之前
+    if "## 完成总结" in text:
+        return text.replace("## 完成总结", block + "\n## 完成总结", 1)
+    return text.rstrip("\n") + "\n\n" + block
+
+
 def cmd_usage(args) -> int:
-    """kanban usage [task-id ...] — 每个任务的 token 用量与耗时 (读 DSH 会话日志 session.jsonl.zstd).
-    无参列出全部卡; 可传一个或多个 task-id. 需要 python3 + zstandard (或 zstd CLI 可用)."""
+    """kanban usage [task-id ...] [--write] — 每个任务的 token 用量与耗时 (读 DSH 会话日志 session.jsonl.zstd).
+    无参列出全部卡; 可传一个或多个 task-id. --write 把指标写进任务卡的「用量指标」章节.
+    需要 python3 + zstandard (或 zstd CLI 可用)."""
+    write = "--write" in args
     ids = [a for a in args if a.endswith("-task")]
     root = board_root()
     project = root.parent
@@ -2560,6 +2578,24 @@ def cmd_usage(args) -> int:
         total = agg["i"] + agg["o"] + agg["r"]
         wall = round((max_t - min_t) / 1000.0) if (min_t is not None and max_t is not None) else 0
         rows.append((tid, state, agg["i"], agg["o"], agg["r"], agg["c"], agg["m"], agg["t"], total, wall))
+
+    if write:
+        written = 0
+        for tid, state, i, o, r, c, m, t, total, wall in rows:
+            if not (i or o or r):
+                continue  # 无会话/无解码, 不写
+            _, entry = find_card(root, tid)
+            text = read_card(entry)
+            body = (f"- 耗时: {wall}s\n"
+                    f"- input: {i} / output: {o} / reasoning: {r} / cache: {c/1e6:.1f}M tokens\n"
+                    f"- 总计: {total} tokens; 消息 {m} 条, 工具调用 {t} 次\n"
+                    f"- 详情: `kanban usage {tid}`")
+            text2 = _upsert_section(text, "用量指标", body)
+            if text2 != text:
+                write_entry(entry, text2)
+                written += 1
+        if written:
+            print(f"已写入 {written} 张卡的「用量指标」章节")
 
     print(f"Board: {project}   (会话目录: {sess_parent})")
     print(f"{'task':34s} {'state':9s} {'input':>8} {'output':>8} {'reason':>7} {'cache(M)':>9} {'msgs':>5} {'tools':>5} {'total':>9} {'wall(s)':>8}")
