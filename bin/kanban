@@ -69,7 +69,9 @@ USAGE = """用法:
                                             内置依赖调度器: 前置任务"放行"且本任务未启动时自动 pick+start;
                                             --gate work(默认): 前置工作已完成(done 或 working 且结果completed=待验收)即放行下一个;
                                             --gate done: 前置进入 done(已确认验收) 才放行; --max 并发上限, --interval 轮询秒; Ctrl-C 停止
-  kanban usage [task-id ...]           每个任务的 token 用量与耗时 (读 DSH 会话日志; 需 python3+zstandard)"""
+  kanban usage [task-id ...]           每个任务的 token 用量与耗时 (读 DSH 会话日志; 需 python3+zstandard)
+  kanban session [name] [--agent dsh|codex|claude]
+                                            一条命令起/入 管理会话 (tmux): 新建 tmux 会话并跑 dsh(默认)/codex/claude, 已存在则 attach"""
 
 
 class KanbanError(Exception):
@@ -2443,6 +2445,49 @@ def cmd_check(args) -> int:
     return 0
 
 
+def cmd_session(args) -> int:
+    """kanban session [name] [--agent dsh|codex|claude] — 一条命令起/入 管理会话 (tmux).
+    以 tmux 会话(名=name, 默认取当前 cwd 目录名) 运行指定 agent CLI:
+      dsh(默认) -> dsh --profile tui;  codex -> codex;  claude -> claude.
+    该 tmux 会话已存在则 attach; 否则新建会话并启动该 CLI."""
+    name = None
+    agent = "dsh"
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--agent":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--agent 需要 dsh|codex|claude")
+            agent = args[i]
+            if agent not in ("dsh", "codex", "claude"):
+                raise KanbanError("--agent 只能是 dsh|codex|claude")
+        elif a.startswith("-"):
+            raise KanbanError(f"未知选项: {a}")
+        elif name is None:
+            name = a
+        else:
+            raise KanbanError(f"未知参数: {a}")
+        i += 1
+    if not name:
+        name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path.cwd().name) or "dsh-session"
+    cli = {"dsh": ["dsh", "--profile", "tui"],
+           "codex": ["codex"],
+           "claude": ["claude"]}[agent]
+    if shutil.which("tmux") is None:
+        raise KanbanError("未找到 tmux; 请先安装 (apt install tmux)")
+    if shutil.which(cli[0]) is None:
+        raise KanbanError(f"未找到 {agent} CLI ({cli[0]}); 请安装或加入 PATH")
+    has = subprocess.run(["tmux", "has-session", "-t", name], capture_output=True)
+    if has.returncode == 0:
+        print(f"attach 到已有 tmux 会话 [{name}] ({agent})...")
+        subprocess.run(["tmux", "attach", "-t", name])
+    else:
+        print(f"新建 tmux 会话 [{name}], 运行 {agent}...")
+        subprocess.run(["tmux", "new-session", "-s", name] + cli)
+    return 0
+
+
 def cmd_auto(args) -> int:
     """kanban auto [--max N] [--interval S] [--gate done|work] [--deps 'slug=d1,d2;slug2=d3'] [--chain 'a,b,c']
     内置依赖调度器 (替代外部 orchestrator): 循环检查看板, 某任务依赖满足且未启动时自动 pick+start;
@@ -2764,6 +2809,8 @@ def main(argv) -> int:
             return cmd_auto(args)
         if cmd == "usage":
             return cmd_usage(args)
+        if cmd == "session":
+            return cmd_session(args)
         raise KanbanError(f"未知命令: {cmd}")
     except KanbanError as exc:
         print(f"kanban: {exc}", file=sys.stderr)
