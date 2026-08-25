@@ -107,6 +107,12 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 | `kanban visual <task-id>` | L4 视觉回归(基线截图 diff,自动检测 compare/PIL/哈希) |
 | `kanban web [--port]` | 看板状态服务(HTML + JSON API) |
 | `kanban group <gid>` / `onevoke-group <gid>` | 任务组依赖状态 / 自动编排 |
+| `kanban auto [--max N] [--interval S] [--gate done\|work] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']` | **内置依赖自动调度器**: 前置任务放行且本任务未启动时自动 `pick+start`;`--max` 并发上限(默认取 `limits.max_concurrent_tasks`),`--interval` 轮询秒,Ctrl-C 停止 |
+
+`kanban auto` 的验收门禁 `--gate`:
+- **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `结果: completed` = 到达等待验收)。这样用户不点验收(如夜间睡觉)流水线也继续;**待验收任务不再占用并发位**。
+- **`done`**: 前置必须进入 `done`(已确认验收) 才开下一个。
+- 依赖来源优先级: `--deps` 显式 map(`slug=dep1,dep2;...`) > `--chain` 线性(每个依赖之前所有) > 卡片「前置任务」。
 
 前端任务验收分 **L0-L5** 五级:L0 静态断言 / L1 JS 逻辑 / L2 接口联调 在卡内由 Agent 完成;
 **L3 浏览器 E2E**(`kanban e2e`)、**L4 视觉回归**(`kanban visual`)独立执行;**L5 视觉还原**
