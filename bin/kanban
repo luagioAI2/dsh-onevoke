@@ -48,6 +48,8 @@ USAGE = """用法:
                                            新建需求文件 (自动编号 REQ-P/A/N-NNN)
   kanban design list [--type t] [--module m] [--status s]   列出需求仓库 (含看板映射)
   kanban design show <REQ-ID|文件路径>    查看需求文件
+  kanban design break <REQ-ID> [--granularity fine|medium|coarse] [--into N]
+                                           细粒度拆分需求为多张任务卡: coarse(默认,1卡) | medium(按验收项2-3组) | fine(每验收项一卡) | --into N 指定张数
   kanban list [state] [--mobile] [--type t] [--module m]  列出卡片 (默认全部状态; 大任务标 [large])
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档|需求仓库> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>

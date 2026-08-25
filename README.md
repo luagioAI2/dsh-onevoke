@@ -86,6 +86,7 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 | `kanban design new --type program\|art\|numeric --module <模块> --title <标题> [--pri P0-P3]` | 建需求文件,编号自动递增(REQ-P-NNN / REQ-A-NNN / REQ-N-NNN),状态默认「待评审」 |
 | `kanban design list [--type t] [--module m] [--status s]` | 需求列表(含看板映射) |
 | `kanban design show <REQ-ID>` | 查看需求文件 |
+| `kanban design break <REQ-ID> [--granularity fine\|medium\|coarse] [--into N]` | **细粒度拆分需求为多张任务卡**: `coarse`(默认,1卡) / `medium`(按验收项2-3组) / `fine`(每验收项一张卡) / `--into N` 指定张数;子卡引用父需求(`需求来源`/`父需求`),父需求写 `- 拆解: 任务id` |
 
 - 各团队规范见 `requirements/specs/`:`program.md`(含**技术架构**: 选型/模块/边界/数据流)、
   `art.md`(设计系统令牌/分辨率适配/产出文件夹/切图/素材分层/reduced-motion)、`numeric.md`(数值表/公式/平衡目标/调参记录);
