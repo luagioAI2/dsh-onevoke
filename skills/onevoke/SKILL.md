@@ -13,6 +13,7 @@ description: Onevoke 式看板工作流: 需求走文件看板(backlog→todo→
 - 用户提出需求/任务/Bug/改动,且该走流程时(开发类)。
 - 用户明确说"走看板 / 建任务 / 按流程来"。
 - 用户说"初始化看板 / 建需求仓库 / 用看板管理这个项目"(新项目接入,见「项目初始化」)。
+- 用户说"恢复看板 / 继续任务 / 接上未完成任务"(会话重启后冷启动,见「冷启动恢复」)。
 - **用户只让执行命令、不让自己干活**(如"用 kanban 建任务并启动, 你只是管理者")→ 按
   「管理者模式」执行: 只跑 kanban 命令, start 后立即结束回合不盯任务。
 - 纯问答、只读排查、纯文档微调、发布部署不强制走流程;用户要求时照走。
@@ -287,6 +288,24 @@ requirements/
   模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > home `~/.dsh/onevoke/reviewers.yml` > 会话默认。执行模型由 kanban start 注入 `/model` 并写进任务 prompt;审核模型由 `onevoke-review` 解析并注入审核 prompt,Agent 汇报时写进卡片。并发上限由 `limits.max_concurrent_tasks` 控制: 达到上限时 `kanban start` 拒绝新任务(0 或省略 = 不限)。
 - **启动者不再巡检该卡**(除非用户要求跟踪);执行 Agent 在独立会话直接向用户汇报。任务并行 = 多个这样的会话并行。
 - 执行 Agent 开工:先 `skill` 加载 onevoke 技能 → `kanban show <id>` 读卡 → 读 `kanban/RULES.md`(项目规则)与 `kanban/MEMORY.md`(跨任务记忆,若存在)→ 读 `requirements/specs/program.md`「技术架构」章节(若存在;实现应遵循其设计,有出入先说明再偏离)→ 读项目 `AGENTS.md`/规则。
+
+## 冷启动恢复(会话重启后接上未完成任务,一条话触发)
+
+会话/WSL/机器重启后,任务 DSH 会话全部消失(看板卡还在,会话日志在 `~/.dsh/sessions/`),恢复流程固定如下,Agent 按序执行即可:
+
+```bash
+cd <项目根>                       # 必须先 cd, board_root() 依赖 cwd 定位看板
+kanban session                   # 起/入管理 tmux 会话 (已存在则 attach; dsh 模式自动应用 plan 模型)
+kanban resume --all              # 批量恢复全部 working 卡的会话 (每卡开 kb-<slug>-r 窗口, 已在运行的跳过)
+kanban auto --deps '<依赖图>' --gate work --max N
+                                 # 依赖调度常驻: 每轮自动恢复中断会话 + 前置就绪即 pick/start 新卡
+```
+
+- **`kanban resume --all`**(无参数同义)= 冷启动核心:遍历 `working/` 卡,卡片有 `会话:` 记录且对应 dsh 进程未在运行 → 自动 `dsh --profile tui --resume=kb-<task-id>` 恢复,窗口 `kb-<slug>-r`;已有进程在跑的卡自动跳过。恢复后任务 agent 从上次进度继续(会话日志续写)。
+- **`kanban auto` 已内置恢复**:每轮轮询先扫描全部 working 卡,发现会话中断自动 resume——所以冷启动只要 `kanban session` + `kanban auto` 两条命令(或 manager 只想恢复不想调度时用 `resume --all`)。
+- 目标 tmux 会话自动选择:当前 tmux 会话 > 项目目录名会话(如 `task-vault`)> 新建同名会话;在 WSL 普通 bash(非 tmux)里跑也生效。
+- 冷启动前如有 DSH TUI 启动失败(报 "duplicate JSONL session id ... appears in multiple project directories"),是历史遗留的重复会话目录:把空壳副本移出 `~/.dsh/sessions/`(保留有内容的一份)即可,详见 MEMORY。
+- **用户提示词示例**: "恢复看板" / "kanban 继续" / "接上未完成任务" —— 触发本流程,Agent 执行后汇报 `kanban list` 状态即可,不追问。
 
 ## Git worktree 流程
 
