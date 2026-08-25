@@ -2476,6 +2476,14 @@ def cmd_session(args) -> int:
            "claude": ["claude"]}[agent]
     if shutil.which("tmux") is None:
         raise KanbanError("未找到 tmux; 请先安装 (apt install tmux)")
+    # 尽量在项目根启动, 让外部 agent (claude/codex) 能读到 AGENTS.md 与 onevoke skill;
+    # 也保证 kanban auto 的 board_root() 落在正确看板.
+    try:
+        proj = board_root().parent
+        if (proj / "kanban").is_dir():
+            os.chdir(proj)
+    except Exception:
+        pass
     if shutil.which(cli[0]) is None:
         raise KanbanError(f"未找到 {agent} CLI ({cli[0]}); 请安装或加入 PATH")
     has = subprocess.run(["tmux", "has-session", "-t", name], capture_output=True)
