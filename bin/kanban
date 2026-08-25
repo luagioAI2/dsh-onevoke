@@ -89,6 +89,14 @@ def board_root() -> Path:
                     return Path(line[len("worktree "):].strip()) / "kanban"
     except Exception:
         pass
+    # 向上查找项目根下的 kanban/ (cwd 不是项目根时也能用, 避免 `kanban auto` 因 cwd 不对解析到别的看板)
+    cur = Path.cwd()
+    for _ in range(20):
+        if (cur / "kanban").is_dir():
+            return cur / "kanban"
+        if cur.parent == cur:
+            break
+        cur = cur.parent
     return Path.cwd() / "kanban"
 
 
