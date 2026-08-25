@@ -67,7 +67,8 @@ USAGE = """用法:
   kanban auto [--max N] [--interval S] [--gate done|work] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']
                                             内置依赖调度器: 前置任务"放行"且本任务未启动时自动 pick+start;
                                             --gate work(默认): 前置工作已完成(done 或 working 且结果completed=待验收)即放行下一个;
-                                            --gate done: 前置进入 done(已确认验收) 才放行; --max 并发上限, --interval 轮询秒; Ctrl-C 停止"""
+                                            --gate done: 前置进入 done(已确认验收) 才放行; --max 并发上限, --interval 轮询秒; Ctrl-C 停止
+  kanban usage [task-id ...]           每个任务的 token 用量与耗时 (读 DSH 会话日志; 需 python3+zstandard)"""
 
 
 class KanbanError(Exception):
@@ -2481,6 +2482,93 @@ def cmd_auto(args) -> int:
         time.sleep(interval)
 
 
+def cmd_usage(args) -> int:
+    """kanban usage [task-id ...] — 每个任务的 token 用量与耗时 (读 DSH 会话日志 session.jsonl.zstd).
+    无参列出全部卡; 可传一个或多个 task-id. 需要 python3 + zstandard (或 zstd CLI 可用)."""
+    ids = [a for a in args if a.endswith("-task")]
+    root = board_root()
+    project = root.parent
+    # DSH sessions 目录名 = cwd sanitize: 去前导 '/', 替换 '/' -> '-', 包 '--...--'
+    seg = str(project).strip().rstrip("/").lstrip("/").replace("/", "-").replace("\\", "-")
+    dsh_home = os.environ.get("DSH_HOME") or os.path.expanduser("~/.dsh")
+    sess_parent = os.path.join(dsh_home, "sessions", f"--{seg}--")
+
+    def _reader(path):
+        """返回可迭代每行已解析对象的生成器; 失败返回 None."""
+        try:
+            import zstandard as zstd
+            f = open(path, "rb")
+            r = zstd.ZstdDecompressor().stream_reader(f)
+            return r
+        except Exception:
+            return None
+
+    tasks = [(entry_id(entry), state) for state, entry in iter_entries(root)
+             if not ids or entry_id(entry) in ids]
+    if not tasks:
+        print(f"无匹配任务 (会话目录: {sess_parent})")
+        return 0
+
+    rows = []
+    for tid, state in tasks:
+        jf = os.path.join(sess_parent, f"kb-{tid}", "session.jsonl.zstd")
+        if not os.path.isfile(jf):
+            rows.append((tid, state, 0, 0, 0, 0, 0, 0, 0, 0))
+            continue
+        agg = {"i": 0, "o": 0, "r": 0, "c": 0, "m": 0, "t": 0}
+        min_t = max_t = None
+        r = _reader(jf)
+        if r is None:
+            rows.append((tid, state, 0, 0, 0, 0, 0, 0, 0, 0))
+            continue
+        try:
+            buf = b""
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        o = json.loads(line.decode("utf-8", "replace"))
+                    except Exception:
+                        continue
+                    if not isinstance(o, dict):
+                        continue
+                    t = o.get("type")
+                    d = o.get("data")
+                    tt = o.get("time") or (d.get("time") if isinstance(d, dict) else None)
+                    if isinstance(tt, (int, float)):
+                        if min_t is None or tt < min_t:
+                            min_t = tt
+                        if max_t is None or tt > max_t:
+                            max_t = tt
+                    if t == "assistant/message" and isinstance(d, dict):
+                        agg["m"] += 1
+                        u = d.get("usage") or {}
+                        agg["i"] += int(u.get("inputTokens") or 0)
+                        agg["o"] += int(u.get("outputTokens") or 0)
+                        agg["r"] += int(u.get("reasoningTokens") or 0)
+                        agg["c"] += int(u.get("cacheReadTokens") or 0)
+                    elif t == "tool/call":
+                        agg["t"] += 1
+        finally:
+            r.close()
+        total = agg["i"] + agg["o"] + agg["r"]
+        wall = round((max_t - min_t) / 1000.0) if (min_t is not None and max_t is not None) else 0
+        rows.append((tid, state, agg["i"], agg["o"], agg["r"], agg["c"], agg["m"], agg["t"], total, wall))
+
+    print(f"Board: {project}   (会话目录: {sess_parent})")
+    print(f"{'task':34s} {'state':9s} {'input':>8} {'output':>8} {'reason':>7} {'cache(M)':>9} {'msgs':>5} {'tools':>5} {'total':>9} {'wall(s)':>8}")
+    for tid, state, i, o, r, c, m, t, total, wall in rows:
+        print(f"{tid:34s} {state:9s} {i:>8} {o:>8} {r:>7} {c/1e6:>9.1f} {m:>5} {t:>5} {total:>9} {wall:>8.0f}")
+    print("提示: 会话日志无 zstd 解码器时该行为 0; 需要 python3+zstandard 或 zstd CLI.")
+    return 0
+
+
 def main(argv) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(USAGE)
@@ -2521,6 +2609,8 @@ def main(argv) -> int:
             return cmd_check(args)
         if cmd == "auto":
             return cmd_auto(args)
+        if cmd == "usage":
+            return cmd_usage(args)
         raise KanbanError(f"未知命令: {cmd}")
     except KanbanError as exc:
         print(f"kanban: {exc}", file=sys.stderr)
