@@ -294,17 +294,21 @@ requirements/
 会话/WSL/机器重启后,任务 DSH 会话全部消失(看板卡还在,会话日志在 `~/.dsh/sessions/`),恢复流程固定如下,Agent 按序执行即可:
 
 ```bash
-cd <项目根>                       # 必须先 cd, board_root() 依赖 cwd 定位看板
+cd <项目根>                       # 必须先 cd, board_root() 依赖 cwd 定位看板; 路径由当前项目决定, 不写死
 kanban session                   # 起/入管理 tmux 会话 (已存在则 attach; dsh 模式自动应用 plan 模型)
 kanban resume --all              # 批量恢复全部 working 卡的会话 (每卡开 kb-<slug>-r 窗口, 已在运行的跳过)
-kanban auto --deps '<依赖图>' --gate work --max N
-                                 # 依赖调度常驻: 每轮自动恢复中断会话 + 前置就绪即 pick/start 新卡
+kanban auto --gate work --max N  # 依赖调度常驻: 每轮自动恢复中断会话 + 前置就绪即 pick/start 新卡
 ```
 
+- **依赖图从项目自己的配置来, 不在 SKILL 里写死**: 调度参数(`--deps` 依赖图 / `--chain` / `--max` / `--interval`)是**项目级配置**, 每个项目不同, 且只应维护在一处。冷启动时按优先级取:
+  1. 项目根已有调度脚本(如 `auto-start.sh`, 内含该项目的 `kanban auto --deps ...` 完整参数)→ 直接复用它的参数(或直接执行它), 不重新发明;
+  2. 卡片建了任务组/「前置任务」字段 → `kanban auto` 无参时自动从卡片读依赖(`--deps`/`--chain` 缺省时读卡片);
+  3. 都没有 → 无参 `kanban auto`(只做恢复 + 按 backlog/todo 顺序启动, 无依赖约束)。
 - **`kanban resume --all`**(无参数同义)= 冷启动核心:遍历 `working/` 卡,卡片有 `会话:` 记录且对应 dsh 进程未在运行 → 自动 `dsh --profile tui --resume=kb-<task-id>` 恢复,窗口 `kb-<slug>-r`;已有进程在跑的卡自动跳过。恢复后任务 agent 从上次进度继续(会话日志续写)。
 - **`kanban auto` 已内置恢复**:每轮轮询先扫描全部 working 卡,发现会话中断自动 resume——所以冷启动只要 `kanban session` + `kanban auto` 两条命令(或 manager 只想恢复不想调度时用 `resume --all`)。
 - 目标 tmux 会话自动选择:当前 tmux 会话 > 项目目录名会话(如 `task-vault`)> 新建同名会话;在 WSL 普通 bash(非 tmux)里跑也生效。
 - 冷启动前如有 DSH TUI 启动失败(报 "duplicate JSONL session id ... appears in multiple project directories"),是历史遗留的重复会话目录:把空壳副本移出 `~/.dsh/sessions/`(保留有内容的一份)即可,详见 MEMORY。
+- dsh TUI 0.1.2 若 `/命令` 报 "Command failed: Cannot read properties of undefined (reading 'aborted')",是 TUI 自身参数错位 bug(与 onevoke 无关):本地 patch `~/.dsh/profiles/tui/node_modules/@dsh-tui/dsh-tui/lib/index.js` 把 `execute(agent, text, controller.signal)` 改为 `execute(agent, text, [], controller.signal)`(详见 MEMORY);不 patch 的话 `/命令` 不执行但 TUI 仍可用。
 - **用户提示词示例**: "恢复看板" / "kanban 继续" / "接上未完成任务" —— 触发本流程,Agent 执行后汇报 `kanban list` 状态即可,不追问。
 
 ## Git worktree 流程
