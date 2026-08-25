@@ -237,6 +237,12 @@ requirements/
   # 契约自动导入: 需求描述→任务目标, 验收标准→验收条件, 不在本轮范围→范围, 类型/模块→卡片头部
   ```
   需求没有的字段(如预期成果)由建卡 Agent 按验收推导补全。
+- **AI 细粒度拆分为多张卡**(取代"一需求一任务",任务更小、返工更少): 当需求较大、想按逻辑单元拆开时:
+  ```bash
+  kanban design break REQ-P-001     # AI 语义拆解为多个子任务卡 (数量由 AI 按逻辑单元定)
+  ```
+  子卡落在 `backlog`, 引用父需求(`需求来源`/`父需求`); 父需求写 `- 拆解: 任务id`。之后对每张子卡
+  `kanban pick` → `kanban start` 逐张推进。若卡已较细, 直接用上面 `kanban new --spec-file`(一需求一卡)即可。
 - **核对**: `kanban design list [--type t] [--module m] [--status s]`(含看板映射)/
   `kanban req-status [requirements|文档] [--type t] [--module m]`;多轮头脑风暴 = 追加新需求文件,
   不覆盖旧的。
