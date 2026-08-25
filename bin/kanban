@@ -63,7 +63,10 @@ USAGE = """用法:
   kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
   kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
   kanban upgrade <task-id>                 小任务 -> 大任务 (仅 backlog/working)
-  kanban check                             列出全部无效入口, 有则非零退出"""
+  kanban check                             列出全部无效入口, 有则非零退出
+  kanban auto [--max N] [--interval S] [--deps 'slug=dep,dep;...'] [--chain 'a,b,c']
+                                            内置依赖调度器: 依赖全部 done(已验收) 且未启动时自动 pick+start;
+                                            并发上限 --max(默认 limits.max_concurrent_tasks), 轮询 --interval; Ctrl-C 停止"""
 
 
 class KanbanError(Exception):
@@ -2313,6 +2316,130 @@ def cmd_check(args) -> int:
     return 0
 
 
+def cmd_auto(args) -> int:
+    """kanban auto [--max N] [--interval S] [--deps 'slug=d1,d2;slug2=d3'] [--chain 'a,b,c']
+    内置依赖调度器 (替代外部 orchestrator): 循环检查看板, 某任务依赖全部 done 且未启动时
+    自动 pick+start; 并发上限 --max (默认取 limits.max_concurrent_tasks, 0=不限); 轮询 --interval 秒.
+    门禁: 只有依赖任务进入 done(=已验收) 才开始本任务, 天然按验收 gating.
+    依赖来源优先级: --deps 显式 map(slug=dep1,dep2;...) > --chain 线性(每个依赖之前所有) > 读卡片「前置任务」."""
+    max_n, interval = 0, 15
+    deps_map, chain = {}, []
+    rest = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--max":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--max 需要数字")
+            max_n = int(args[i])
+        elif a == "--interval":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--interval 需要数字")
+            interval = int(args[i])
+        elif a == "--deps":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--deps 需要 'slug=d1,d2;...'")
+            for part in args[i].split(";"):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    deps_map[k.strip()] = [d.strip() for d in v.split(",") if d.strip()]
+        elif a == "--chain":
+            i += 1
+            if i >= len(args):
+                raise KanbanError("--chain 需要 'a,b,c'")
+            chain = [x.strip() for x in args[i].split(",") if x.strip()]
+        else:
+            rest.append(a)
+        i += 1
+    if rest:
+        raise KanbanError(f"未知参数: {' '.join(rest)}")
+
+    root = board_root()
+    # slug -> task_id: 从看板实际任务 id 推导 (YYYYMMDD-slug-task), 不依赖今天的日期.
+    # 状态每次实时扫描看板, 不缓存 (否则前端把依赖移 done 后, auto 看到的仍是旧状态).
+    slug_to_tid = {}
+    for state, entry in iter_entries(root):
+        tid = entry_id(entry)
+        slug = tid.split("-", 1)[1].rsplit("-task", 1)[0] if tid.endswith("-task") else tid
+        slug_to_tid[slug] = tid
+    cfg = _parse_project_config()
+    if max_n == 0:
+        try:
+            max_n = int((cfg.get("limits") or {}).get("max_concurrent_tasks", 0) or 0)
+        except Exception:
+            max_n = 0
+
+    def _state(slug: str) -> str:
+        tid = slug_to_tid.get(slug)
+        if not tid:
+            return ""
+        st, _ = find_card_any(root, tid)
+        return st or ""
+
+    def _count_working() -> int:
+        return sum(1 for s, e in iter_entries(root) if s == "working")
+
+    print(f"auto-scheduler: deps={bool(deps_map)} chain={bool(chain)} 卡片前置={(not deps_map and not chain)} "
+          f"max={max_n or '不限'} interval={interval}s")
+    while True:
+        if deps_map:
+            slugs = list(deps_map.keys())
+        elif chain:
+            slugs = list(chain)
+        else:
+            slugs = [tid.split("-", 1)[1].rsplit("-task", 1)[0]
+                     for s, e in iter_entries(root) if s in ("backlog", "todo")]
+        wc = _count_working()
+        for slug in slugs:
+            tid = slug_to_tid.get(slug)
+            if not tid:
+                continue
+            st = _state(slug)
+            if st in ("working", "done"):
+                continue
+            if deps_map:
+                dep_slugs = deps_map.get(slug, [])
+            elif chain:
+                try:
+                    dep_slugs = chain[:chain.index(slug)]
+                except ValueError:
+                    dep_slugs = []
+            else:
+                _, entry = find_card_any(root, tid)
+                _, dep_slugs = group_fields(read_card(entry)) if entry else (None, [])
+            # dep_slugs 可能以 task id 或 slug 形式给出; 归一化成 slug 再判 done
+            dep_ok = True
+            for d in dep_slugs:
+                d_slug = d.split("-", 1)[1].rsplit("-task", 1)[0] if d.endswith("-task") else d
+                if _state(d_slug) != "done":
+                    dep_ok = False
+                    break
+            if not dep_ok:
+                continue
+            if max_n and wc >= max_n:
+                print(f"[{now()}] 并发上限 {wc}/{max_n}, 等待 {tid}")
+                break
+            if st == "backlog":
+                print(f"[{now()}] pick {tid}")
+                try:
+                    cmd_pick([tid])
+                except KanbanError as exc:
+                    print(f"[{now()}] pick {tid} 失败: {exc}")
+                    continue
+                st = "todo"
+            if st == "todo":
+                print(f"[{now()}] start {tid}")
+                try:
+                    cmd_start([tid])
+                except KanbanError as exc:
+                    print(f"[{now()}] start {tid} 失败: {exc}")
+                wc += 1
+        time.sleep(interval)
+
+
 def main(argv) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(USAGE)
@@ -2351,6 +2478,8 @@ def main(argv) -> int:
             return cmd_web(args)
         if cmd == "check":
             return cmd_check(args)
+        if cmd == "auto":
+            return cmd_auto(args)
         raise KanbanError(f"未知命令: {cmd}")
     except KanbanError as exc:
         print(f"kanban: {exc}", file=sys.stderr)
