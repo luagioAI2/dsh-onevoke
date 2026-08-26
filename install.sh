@@ -25,21 +25,29 @@ echo "规则已安装(外部智能体): $AGENTS_RULES_DIR"
 
 # 2. CLI -> ~/.local/bin (POSIX/WSL) 与 $DSH_HOME/bin (跨平台, Windows pwsh 也可用)
 # 防御: Windows git autocrlf 可能让工作区脚本带 CRLF, 剥掉 \r 保证 shebang 可用
-for f in kanban onevoke-review onevoke-group create-session.mjs; do
+for f in kanban onevoke-review onevoke-group create-session.mjs wslsh; do
   # 跨平台剥 CRLF (GNU/BSD sed 语法不同, 用临时文件)
   tr -d '\r' < "$HERE/bin/$f" > "$HERE/bin/$f.tmp" && mv "$HERE/bin/$f.tmp" "$HERE/bin/$f"
 done
 install -m 0755 "$HERE/bin/kanban" "$BIN_DIR/kanban"
 install -m 0755 "$HERE/bin/onevoke-review" "$BIN_DIR/onevoke-review"
 install -m 0755 "$HERE/bin/onevoke-group" "$BIN_DIR/onevoke-group"
+install -m 0755 "$HERE/bin/wslsh" "$BIN_DIR/wslsh"
 install -m 0644 "$HERE/bin/create-session.mjs" "$BIN_DIR/create-session.mjs"
 mkdir -p "$DSH_HOME/bin"
 install -m 0755 "$HERE/bin/kanban" "$DSH_HOME/bin/kanban"
 install -m 0755 "$HERE/bin/onevoke-review" "$DSH_HOME/bin/onevoke-review"
 install -m 0755 "$HERE/bin/onevoke-group" "$DSH_HOME/bin/onevoke-group"
+install -m 0755 "$HERE/bin/wslsh" "$DSH_HOME/bin/wslsh"
 install -m 0644 "$HERE/bin/create-session.mjs" "$DSH_HOME/bin/create-session.mjs"
-echo "CLI 已安装: $BIN_DIR/kanban, $BIN_DIR/onevoke-review, $BIN_DIR/onevoke-group"
-echo "CLI 已安装(DSH home): $DSH_HOME/bin/kanban, $DSH_HOME/bin/onevoke-review, $DSH_HOME/bin/onevoke-group"
+echo "CLI 已安装: $BIN_DIR/kanban, $BIN_DIR/onevoke-review, $BIN_DIR/onevoke-group, $BIN_DIR/wslsh"
+echo "CLI 已安装(DSH home): $DSH_HOME/bin/kanban, $DSH_HOME/bin/onevoke-review, $DSH_HOME/bin/onevoke-group, $DSH_HOME/bin/wslsh"
+
+# 2b. 规范文档 -> ~/dsh-onevoke/docs (与技能同源; 供会话/Agent 查阅 WSL 执行规范)
+DOCS_HOME="$HOME/dsh-onevoke/docs"
+mkdir -p "$DOCS_HOME"
+cp "$HERE/docs/wsl-command-guide.md" "$DOCS_HOME/wsl-command-guide.md" 2>/dev/null || true
+echo "规范文档已安装: $DOCS_HOME/wsl-command-guide.md"
 
 # 3. 不再创建全局 ~/.dsh/AGENTS.md 指针 — dsh-onevoke 按项目 opt-in:
 #    使用本插件的项目在仓库根放 AGENTS.md (进 git, 团队共享) 声明即可,

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# wslsh — WSL bash 脚本统一执行入口 (dsh-onevoke 工具链)
+#
+# 背景: 从 Windows PowerShell 调 wsl.exe 内联 bash 命令会有双重解析转义地狱
+# (PowerShell 弱引用先展开 $var/$(...)/反引号, bash 再解析一次)。
+# 本工具把执行收敛为"脚本文件 + 单条无特殊字符调用"。
+#
+# 用法:
+#   bash wslsh <script.sh> [args...]        # 执行脚本 (自动剥 CRLF)
+#   bash wslsh -c '<command>'               # 执行命令串 (单引号包裹, 仅适合简单命令)
+#   bash wslsh --list                       # 列出项目 .dev-logs/ 下可用脚本
+#
+# Windows PowerShell 侧调用模板:
+#   wsl.exe -d Ubuntu-22.04 -- bash -lc "cd /mnt/e/plan/test24/task-vault && bash ~/dsh-onevoke/bin/wslsh .dev-logs/xxx.sh"
+#
+# 行为:
+#   - 自动把 CRLF 脚本剥成 LF 后执行 (从 Windows 复制来的脚本常带 \r)
+#   - 脚本不存在时给出项目 .dev-logs/ 可用脚本清单, 便于发现拼写错误
+#   - 脚本需可执行位? 不需要 — 用 `bash script` 调用, 不依赖 +x
+#
+# 规范文档: dsh-onevoke/docs/wsl-command-guide.md
+
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  echo "用法: bash wslsh <script.sh> [args...] | -c '<cmd>' | --list" >&2
+  exit 2
+}
+
+# 从当前 cwd 向上找项目根 (含 .dev-logs/ 或 kanban/ 或 package.json 的目录)
+find_project_root() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    if [ -d "$d/.dev-logs" ] || [ -d "$d/kanban" ] || [ -f "$d/package.json" ]; then
+      echo "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+list_scripts() {
+  local proj
+  proj="$(find_project_root)" || proj="$PWD"
+  echo "项目根: $proj"
+  echo "--- .dev-logs/ ---"
+  ls -1 "$proj/.dev-logs"/*.sh 2>/dev/null | sed "s|$proj/||" || echo "(无 .sh 脚本)"
+  echo "--- kanban/ ---"
+  ls -1 "$proj/kanban"/*.sh 2>/dev/null | sed "s|$proj/||" || true
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+  --list)
+    list_scripts
+    exit 0
+    ;;
+  -c)
+    [ $# -ge 2 ] || usage
+    # 简单命令串: 原样交给 bash 执行 (调用方需自己保证转义; 建议优先走脚本文件)
+    shift
+    bash -c "$1"
+    exit $?
+    ;;
+  --help|-h)
+    usage
+    ;;
+esac
+
+SCRIPT="$1"
+shift
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "wslsh: 脚本不存在: $SCRIPT" >&2
+  echo "--- 可用脚本 ---" >&2
+  list_scripts >&2
+  exit 1
+fi
+
+# 剥 CRLF 到临时文件再执行 (bash 遇 \r 会报错; 不污染原文件)
+if grep -q $'\r' "$SCRIPT" 2>/dev/null; then
+  TMP="$(mktemp /tmp/wslsh-XXXXXX.sh)"
+  sed 's/\r$//' "$SCRIPT" > "$TMP"
+  chmod +x "$TMP" 2>/dev/null || true
+  echo "wslsh: 检测到 CRLF, 已剥成 LF 执行 ($SCRIPT)" >&2
+  bash "$TMP" "$@"
+  RC=$?
+  rm -f "$TMP"
+  exit $RC
+fi
+
+exec bash "$SCRIPT" "$@"

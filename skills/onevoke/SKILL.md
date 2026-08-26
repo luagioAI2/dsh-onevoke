@@ -119,6 +119,16 @@ kanban 只管状态机(建卡/派活/迁移/验收门禁),执行器是谁无所�
 - 任务完成时把关键决策、踩过的坑、适用的 commit 追加为短条目;新任务开工先读它。
 - 不手写 session 流水,不把对话记录整段复制进记忆。
 
+**命令执行规范 (Windows + WSL, 必读)**
+- 从 Windows PowerShell 经 `wsl.exe` 调 WSL bash 时,**禁止内联复杂 bash 命令**:
+  PowerShell 双引号是弱引用, `$var`/`$(...)`/反引号/嵌套引号会被 PowerShell 先展开,
+  bash 再解析一次, 双重解析必炸 (本工具链踩过多次)。
+- **硬性规则**: 所有含 shell 元字符的命令写成 `.sh` 脚本文件 (write 工具, UTF-8/LF),
+  PowerShell 侧只发一条无特殊字符调用:
+  `wsl.exe -d Ubuntu-22.04 -- bash -lc "cd <项目根> && bash <脚本>"`。
+- 统一执行入口: `bash wslsh <script.sh> [args...]` (自动剥 CRLF + 定位项目根),
+  完整规范见 `docs/wsl-command-guide.md` (与 dsh-onevoke 同源安装)。
+
 ## 看板模型(kanban CLI)
 
 看板是**文件系统目录**,不进 Git,唯一实例在主 worktree 根:
