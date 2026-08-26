@@ -114,7 +114,7 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 > `kanban session` 是**管理模式入口**: 起一个指挥会话 (tmux + 你选的 CLI)。在会话里用自然语言指挥 agent: 记录需求(`design new`)、AI 拆细卡(`design break`)、按依赖自动开始(`kanban auto`)。外部 CLI(`claude`/`codex`)需本机已装已登录,并依赖项目根 `AGENTS.md`(`kanban init --agents`)与 `~/.agents/skills/onevoke`(install.sh) 才能读到 onevoke 流程。
 
 `kanban auto` 的验收门禁 `--gate`:
-- **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `结果: completed` = 到达等待验收)。这样用户不点验收(如夜间睡觉)流水线也继续;**待验收任务不再占用并发位**。
+- **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `结果: completed` = 到达等待验收)。卡片用 `验收: 人工|自动` 标记策略：人工任务保留在 working 等确认但不占并发位，自动任务由 auto 自动迁入 done。
 - **`done`**: 前置必须进入 `done`(已确认验收) 才开下一个。
 - 依赖来源优先级: `--deps` 显式 map(`slug=dep1,dep2;...`) > `--chain` 线性(每个依赖之前所有) > 卡片「前置任务」。
 

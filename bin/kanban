@@ -32,6 +32,8 @@ from urllib.parse import unquote
 from pathlib import Path
 
 STATES = ("backlog", "todo", "working", "done", "archived", "trash")
+# 验收策略是卡片字段，不新增状态目录：人工任务在 working 等用户验收，自动任务可由 auto 直接收口。
+ACCEPTANCE_MODES = ("人工", "自动")
 TYPES = ("feature", "bug", "chore", "research")
 TASK_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-task$")
 GROUP_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-group$")
@@ -61,6 +63,7 @@ USAGE = """用法:
                                            自动开 tmux 窗口跑对应 CLI (QuickTUI 可见, 校验依赖)
   kanban resume [--all | <task-id>]     恢复卡片记录的会话 (--all/无参=全部 working 卡; 崩溃/中断后续跑)
   kanban move <task-id> <todo|working|done|archived|trash>
+                                            卡片 `- 验收: 人工|自动`; 人工完成仍留 working 等验收, 自动完成可由 auto 收口
   kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
   kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
   kanban upgrade <task-id>                 小任务 -> 大任务 (仅 backlog/working)
@@ -236,6 +239,16 @@ def dump_card(entry: Path) -> None:
                 print(read_any_text(p))
 
 
+def acceptance_mode(text: str) -> str:
+    """读取卡片验收策略；缺省兼容旧卡，按人工处理。"""
+    m = re.search(r"^- 验收:\s*(人工|自动)\s*$", text, re.M)
+    return m.group(1) if m else "人工"
+
+
+def is_work_completed(text: str) -> bool:
+    return bool(re.search(r"^- 结果:\s*completed\s*$", text, re.M))
+
+
 def template_card(title: str, kind: str) -> str:
     return f"""# {title}
 
@@ -246,6 +259,7 @@ def template_card(title: str, kind: str) -> str:
 - 完成时间:
 - 任务分支:
 - 审核: 标准
+- 验收: 人工
 - 结果:
 
 ## 任务目标
@@ -422,7 +436,7 @@ plan:                     # 规划模型 (指挥/规划会话; kanban session �
 # executor:                 # 任务执行器 (kanban start 默认用谁; --agent 可临时覆盖)
 #   agent: dsh              # dsh (DSH 会话, 默认) | claude | codex (外部 CLI, 自动开 tmux kb-* 窗口)
 # limits:                   # 并发限制
-#   max_concurrent_tasks: 2 # 最大同时任务数 (working 卡上限; 0=不限, 默认); 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖
+#   max_concurrent_tasks: 2 # 最大同时任务数 (未完成实施的 working 卡上限; 待人工验收不占位); 环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖
 """
 
 BOARD_RULES_TEMPLATE = """# 本看板项目规则 (kanban/RULES.md)
@@ -1779,8 +1793,7 @@ def check_deps(root: Path, text: str, task_id: str) -> list:
 
 
 def _check_concurrency(root: Path, cfg: dict) -> None:
-    """最大同时任务数: .dsh-onevoke.yml limits.max_concurrent_tasks (0=不限),
-    环境变量 KANBAN_MAX_CONCURRENT_TASKS 覆盖. 达到上限时拒绝新 start."""
+    """最大同时任务数；实施已完成且等待验收的 working 卡不占槽位。"""
     limit = int(os.environ.get("KANBAN_MAX_CONCURRENT_TASKS",
                                 (cfg.get("limits") or {}).get("max_concurrent_tasks", 0) or 0))
     if limit <= 0:
@@ -1791,9 +1804,11 @@ def _check_concurrency(root: Path, cfg: dict) -> None:
     if wdir.is_dir():
         for entry in wdir.iterdir():
             if entry.is_file() and entry.suffix == ".md":
-                working += 1
+                if not is_work_completed(read_card(entry)):
+                    working += 1
             elif entry.is_dir() and (entry / "spec.md").is_file():
-                working += 1
+                if not is_work_completed(read_card(entry)):
+                    working += 1
     if working >= limit:
         raise KanbanError(
             f"已达到并发上限: working 中有 {working} 张卡, max_concurrent_tasks={limit} "
@@ -2663,9 +2678,7 @@ def cmd_auto(args) -> int:
         return st or ""
 
     def _ready(slug: str) -> bool:
-        """验收门禁: 前置任务是否"已放行"下一个.
-        work: done 或 (working 且 结果: completed = 到达等待验收) 即放行;
-        done: 必须 done(=已确认验收)."""
+        """验收门禁: work 接受已完成的人工待验收卡；done 只接受最终完成卡。"""
         st = _state(slug)
         if st == "done":
             return True
@@ -2673,7 +2686,7 @@ def cmd_auto(args) -> int:
             tid = slug_to_tid.get(slug)
             if tid:
                 _, entry = find_card_any(root, tid)
-                if entry and re.search(r"^- 结果:\s*completed\s*$", read_card(entry), re.M):
+                if entry and is_work_completed(read_card(entry)):
                     return True
         return False
 
@@ -2682,8 +2695,8 @@ def cmd_auto(args) -> int:
         for s, e in iter_entries(root):
             if s != "working":
                 continue
-            if gate == "work" and re.search(r"^- 结果:\s*completed\s*$", read_card(e), re.M):
-                continue  # --gate work: 待验收(工作已完成)不再占并发位, 让链条继续
+            if is_work_completed(read_card(e)):
+                continue  # 已完成实施的卡片不占并发位；人工验收仍留 working
             n += 1
         return n
 
@@ -2697,6 +2710,18 @@ def cmd_auto(args) -> int:
         else:
             slugs = [entry_id(e).split("-", 1)[1].rsplit("-task", 1)[0]
                      for s, e in iter_entries(root) if s in ("backlog", "todo")]
+        # 自动验收卡完成后直接收口；人工验收卡保持 working，等待用户确认。
+        for s, e in list(iter_entries(root)):
+            if s != "working":
+                continue
+            text = read_card(e)
+            if acceptance_mode(text) == "自动" and is_work_completed(text):
+                tid = entry_id(e)
+                try:
+                    cmd_move([tid, "done"])
+                    print(f"[{now()}] 自动验收 {tid} -> done")
+                except KanbanError as exc:
+                    print(f"[{now()}] 自动验收 {tid} 暂不能收口: {exc}")
         wc = _count_working()
         # 每次轮询先扫描全部 working 卡: 会话中断(有会话记录但无 dsh 进程)自动恢复
         for s, e in iter_entries(root):
@@ -2705,6 +2730,8 @@ def cmd_auto(args) -> int:
             tid = entry_id(e)
             try:
                 text = read_card(e)
+                if is_work_completed(text):
+                    continue  # 实施已经结束，人工验收卡不应被 auto 当成中断会话恢复。
                 m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
                 if m and not _session_running(m.group(1).strip()):
                     print(f"[{now()}] 恢复中断会话 {tid} ({m.group(1)})")
