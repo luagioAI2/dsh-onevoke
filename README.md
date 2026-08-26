@@ -114,7 +114,7 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 > `kanban session` 是**管理模式入口**: 起一个指挥会话 (tmux + 你选的 CLI)。在会话里用自然语言指挥 agent: 记录需求(`design new`)、AI 拆细卡(`design break`)、按依赖自动开始(`kanban auto`)。外部 CLI(`claude`/`codex`)需本机已装已登录,并依赖项目根 `AGENTS.md`(`kanban init --agents`)与 `~/.agents/skills/onevoke`(install.sh) 才能读到 onevoke 流程。
 
 `kanban auto` 的验收门禁 `--gate`:
-- **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `结果: completed` = 到达等待验收)。卡片用 `验收: 人工|自动` 标记策略：人工任务保留在 working 等确认但不占并发位，自动任务由 auto 自动迁入 done。
+- **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `工作结果: completed` = 到达等待验收)。卡片用 `验收: 人工|自动` 标记策略：人工任务保留在 working 等确认但不占并发位，自动任务由 auto 自动迁入 done。
 - **`done`**: 前置必须进入 `done`(已确认验收) 才开下一个。
 - 依赖来源优先级: `--deps` 显式 map(`slug=dep1,dep2;...`) > `--chain` 线性(每个依赖之前所有) > 卡片「前置任务」。
 
@@ -160,7 +160,7 @@ limits:                   # 并发限制
 - `kanban/RULES.md` — 项目级规则补充(任务 Agent 开工先读);`kanban/MEMORY.md` — 跨任务记忆。
 - 规则优先级: 当前任务用户指令 > 项目 AGENTS.md > `kanban/RULES.md` > persona(条件触发)> 技能默认。
 - 模型解析优先级: 会话 `/model` > 看板 `reviewers.<角色>` > 看板 `review` > `~/.dsh/onevoke/reviewers.yml` > 会话默认。
-- 审核等级(**分级通道**,按改动性质选级): 纯样式/演示 → `light`(轻量,只 PM);碰文案/逻辑/接口/数值 → `standard`(标准,默认);资金/安全/对外交付 → `full`(完整,全角色 + **资金专项**: 金额/幂等/原子性/审计留痕/失败路径)。卡 `- 审核:` 字段 / `--review` 显式设定;纯 Markdown 或 ≤10 行净改动自动豁免。
+- 审核等级(**分级通道**,按改动性质选级): 默认 `standard`(标准,PM → QA);纯样式/演示可用 `light`(轻量,只 PM);仅在用户显式指定 `full` 或确认升级时运行 CSA/Hacker。卡 `- 审核:` 字段 / `--review` 显式设定;纯 Markdown 或 ≤10 行净改动自动豁免。
 - **红线**: 卡片「红线」章节列本任务禁止事项(不可改的模块/数据/环境),施工遇红线停下报告;需求文件的「红线」随 `--spec-file` 自动导入。
 
 ---

@@ -19,7 +19,8 @@ make_card() {
 - 任务分支: test
 - 审核: 轻量
 - 验收: ${mode}
-- 结果: completed
+- 工作结果: completed
+- 结果:
 
 ## 任务目标
 
@@ -68,10 +69,12 @@ make_card "$auto_root" 自动
 KANBAN_DIR="$auto_root" timeout 2 python3 "$KANBAN" auto --interval 1 --gate work >/dev/null 2>&1 || true
 [ -f "$auto_root/done/20260827-acceptance-test-task.md" ]
 [ ! -e "$auto_root/working/20260827-acceptance-test-task.md" ]
+grep -qx -- '- 结果: completed' "$auto_root/done/20260827-acceptance-test-task.md"
 
 manual_root="$base/manual/kanban"
 make_card "$manual_root" 人工
 KANBAN_DIR="$manual_root" timeout 2 python3 "$KANBAN" auto --interval 1 --gate work >/dev/null 2>&1 || true
 [ -f "$manual_root/working/20260827-acceptance-test-task.md" ]
 [ ! -e "$manual_root/done/20260827-acceptance-test-task.md" ]
+grep -qx -- '- 结果:' "$manual_root/working/20260827-acceptance-test-task.md"
 printf '%s\n' 'acceptance mode tests passed'

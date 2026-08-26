@@ -63,7 +63,7 @@ USAGE = """用法:
                                            自动开 tmux 窗口跑对应 CLI (QuickTUI 可见, 校验依赖)
   kanban resume [--all | <task-id>]     恢复卡片记录的会话 (--all/无参=全部 working 卡; 崩溃/中断后续跑)
   kanban move <task-id> <todo|working|done|archived|trash>
-                                            卡片 `- 验收: 人工|自动`; 人工完成仍留 working 等验收, 自动完成可由 auto 收口
+                                            卡片 `- 验收: 人工|自动`; `工作结果: completed` 表示实施完成但不改变最终 `结果`
   kanban group <group-id>                  任务组依赖状态 (成员/前置/就绪)
   kanban web [--port 8090] [--bind 0.0.0.0]  看板状态服务 (HTML + JSON API)
   kanban upgrade <task-id>                 小任务 -> 大任务 (仅 backlog/working)
@@ -246,7 +246,11 @@ def acceptance_mode(text: str) -> str:
 
 
 def is_work_completed(text: str) -> bool:
-    return bool(re.search(r"^- 结果:\s*completed\s*$", text, re.M))
+    """实施完成标记；最终 `结果: completed` 仍只由用户验收后填写。
+    兼容旧版 auto 已写入 working 卡的结果标记。"""
+    return bool(re.search(r"^- 工作结果:\s*completed\s*$", text, re.M)) or bool(
+        re.search(r"^- 结果:\s*completed\s*$", text, re.M)
+    )
 
 
 def template_card(title: str, kind: str) -> str:
@@ -260,6 +264,7 @@ def template_card(title: str, kind: str) -> str:
 - 任务分支:
 - 审核: 标准
 - 验收: 人工
+- 工作结果:
 - 结果:
 
 ## 任务目标
@@ -2695,7 +2700,7 @@ def cmd_auto(args) -> int:
         for s, e in iter_entries(root):
             if s != "working":
                 continue
-            if is_work_completed(read_card(e)):
+            if gate == "work" and is_work_completed(read_card(e)):
                 continue  # 已完成实施的卡片不占并发位；人工验收仍留 working
             n += 1
         return n
@@ -2718,6 +2723,9 @@ def cmd_auto(args) -> int:
             if acceptance_mode(text) == "自动" and is_work_completed(text):
                 tid = entry_id(e)
                 try:
+                    # 自动验收显式把实施完成提升为最终验收完成，再复用原有 done 校验。
+                    text = re.sub(r"^- 结果:\s*.*$", "- 结果: completed", text, count=1, flags=re.M)
+                    write_entry(e, text)
                     cmd_move([tid, "done"])
                     print(f"[{now()}] 自动验收 {tid} -> done")
                 except KanbanError as exc:
