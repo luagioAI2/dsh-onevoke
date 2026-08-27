@@ -35,6 +35,11 @@ STATES = ("backlog", "todo", "working", "done", "archived", "trash")
 # 验收策略是卡片字段，不新增状态目录：人工任务在 working 等用户验收，自动任务可由 auto 直接收口。
 ACCEPTANCE_MODES = ("人工", "自动")
 TYPES = ("feature", "bug", "chore", "research")
+
+# 自动卡死探测节流: 同一卡刚被自动 kill+resume 后, 在 _STALE_THROTTLE 秒内不再重复处理,
+# 避免会话恢复后若再次卡死造成每轮无限 kill/resume 轰炸。
+_STALE_HANDLED = {}
+_STALE_THROTTLE = 1800  # 30 分钟
 TASK_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-task$")
 GROUP_ID_RE = re.compile(r"^\d{8}-[a-z0-9-]+-group$")
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
@@ -249,10 +254,85 @@ def acceptance_mode(text: str) -> str:
 
 def is_work_completed(text: str) -> bool:
     """实施完成标记；最终 `结果: completed` 仍只由用户验收后填写。
-    兼容旧版 auto 已写入 working 卡的结果标记。"""
+    兼容旧版 auto 已写入 working 卡的结果标记。
+    字段必须严格等于 completed (尾随说明应放「完成总结」; 见 normalize_result_field)."""
     return bool(re.search(r"^- 工作结果:\s*completed\s*$", text, re.M)) or bool(
         re.search(r"^- 结果:\s*completed\s*$", text, re.M)
     )
+
+
+def pause_reason(text: str) -> str:
+    """读取卡片 `- 暂停:` 标记 (无则为空)."""
+    m = re.search(r"^- 暂停:[ \t]*(\S[^\r\n]*)$", text, re.M)
+    return m.group(1).strip() if m and m.group(1).strip() else ""
+
+
+def set_pause(text: str, reason: str) -> str:
+    """写入/更新 `- 暂停:` 标记 (幂等; 无该行则插在 `- 阶段:` 后)."""
+    val = reason.strip().replace("\n", " ")[:120]
+    if re.search(r"^- 暂停:.*$", text, re.M):
+        return re.sub(r"^- 暂停:[^\r\n]*$", f"- 暂停: {val}", text, count=1, flags=re.M)
+    return re.sub(r"(^- 阶段:.*$)", rf"\1\n- 暂停: {val}", text, count=1, flags=re.M)
+
+
+def clear_pause(text: str) -> str:
+    """清空 `- 暂停:` 标记 (保留字段置空)."""
+    if re.search(r"^- 暂停:[ \t]*\S", text, re.M):
+        return re.sub(r"^- 暂停:[^\r\n]*$", "- 暂停:", text, count=1, flags=re.M)
+    return text
+
+
+def kill_session(session_id: str) -> bool:
+    """kill 掉指定会话的 dsh 进程 (限流卡死/需要强制重启时)."""
+    if not session_id:
+        return False
+    killed = False
+    try:
+        out = subprocess.run(["ps", "-eo", "pid,args="],
+                             capture_output=True, text=True, check=False, timeout=10)
+        for line in out.stdout.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2 and session_id in parts[1] and ("--resume" in parts[1] or "--profile" in parts[1]):
+                pid = parts[0]
+                subprocess.run(["kill", pid], check=False, timeout=10)
+                killed = True
+        return killed
+    except Exception:
+        return False
+
+
+def _append_line_to_section(text: str, section: str, line: str) -> str:
+    """把一行追加进指定章节 (若存在), 否则原样返回 (不新建)."""
+    marker = f"## {section}\n"
+    if marker not in text:
+        return text
+    head, rest = text.split(marker, 1)
+    m = re.search(r"\n## ", rest)
+    if m:
+        body, tail = rest[:m.start()], rest[m.start():]
+    else:
+        body, tail = rest, ""
+    return head + marker + body.rstrip("\n") + "\n" + line + "\n" + tail
+
+
+def normalize_result_field(text: str) -> str:
+    """归正结果字段为严格 `completed`: 若 `结果/工作结果` 行是 `completed <尾随说明>`,
+    把字段收成严格 `completed`, 尾随说明搬进「完成总结」章节, 保持判定严格、信息不丢."""
+    for field in ("工作结果", "结果"):
+        m = re.search(rf"^- {field}:\s*completed[ \t]+(\S.*)$", text, re.M)
+        if m:
+            note = m.group(1).strip()
+            # 去掉常见包裹括号
+            note = note.strip()
+            if note.startswith("(") and note.endswith(")"):
+                note = note[1:-1].strip()
+            elif note.startswith("（") and note.endswith("）"):
+                note = note[1:-1].strip()
+            if note:
+                text = _append_line_to_section(text, "完成总结", f"- 结果说明: {note}")
+            text = re.sub(rf"^- {field}:\s*completed[ \t]+\S.*$",
+                          f"- {field}: completed", text, count=1, flags=re.M)
+    return text
 
 
 # 审核阶段标签 (列内标签, 不新增状态目录; 执行 Agent 用 `kanban stage <id> <阶段>` 更新)
@@ -284,8 +364,9 @@ def template_card(title: str, kind: str) -> str:
 - 审核: 标准
 - 验收: 人工
 - 阶段: 实施中
-- 工作结果:
-- 结果:
+- 暂停:                # 因模型限流/外部故障暂停时填原因 (auto 恢复优先处理并清标记)
+- 工作结果:          # 实施完成填 completed (严格, 不要尾随说明); 说明放「完成总结」
+- 结果:              # 用户验收后填 completed (严格, 不要尾随说明)
 
 ## 任务目标
 
@@ -1767,6 +1848,8 @@ def task_prompt(task_id: str, title: str, entry: Path) -> str:
         f"看板任务 {task_id} - {title}。"
         f"先加载 onevoke 技能并遵循它; 再读卡片 {entry}; 再读项目 AGENTS.md/规则。"
         f"然后按技能流程实现该任务 (worktree + 分支 + 提交 + 审核 + 请求验收)。"
+        f"写卡片字段务必遵守: `结果:`/`工作结果:` 只允许写严格的 `completed` (或留空),"
+        f"禁止写任何尾随说明; 所有补充说明/结论/依据一律写入「完成总结」或「讨论与决策」章节。"
         f"本任务在独立会话中执行; 会话恢复 id 见 TUI 退出提示, 结束时把它记入卡片"
         f"「讨论与决策」(格式: 会话: <id>)。"
         + "".join(notes)
@@ -1834,12 +1917,36 @@ def cmd_resume(args) -> int:
             if r.returncode == 0:
                 print(f"已在 tmux window [{win}] 恢复会话: {session_id}")
                 restored += 1
+                # 恢复成功则清暂停标记 (说明要跑了)
+                if pause_reason(text):
+                    write_entry(entry, clear_pause(text))
                 continue
         print(f"请在新终端恢复任务会话:")
         print(f"  {launch_cmd}")
         print("然后粘贴: 继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。")
         skipped += 1
     print(f"resume 完成: 恢复 {restored}, 跳过 {skipped}")
+    return 0
+
+
+def cmd_pause(args) -> int:
+    """kanban pause <task-id> <原因...> — 给任务打暂停标记 (因模型限流/外部故障停下时用).
+    写入 `- 暂停: <原因>`; 若对应会话进程在跑则 kill (卡死时用 --kill 强制)."""
+    if len(args) < 2:
+        raise KanbanError("kanban pause 需要: <task-id> <原因...>")
+    tid = args[0]
+    reason = " ".join(args[1:])
+    root = board_root()
+    state, entry = find_card(root, tid)
+    text = read_card(entry)
+    text = set_pause(text, reason)
+    write_entry(entry, text)
+    # 顺手停掉还挂着的会话进程, 避免占用并发位/无限重试
+    m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+    if m and _session_running(m.group(1).strip()):
+        kill_session(m.group(1).strip())
+        print(f"已 kill 会话 {m.group(1)} (暂停后不应继续空转)")
+    print(f"{tid} 已标记暂停: {reason} (状态: {state})")
     return 0
 
 
@@ -1929,6 +2036,39 @@ def _session_running(session_id: str) -> bool:
     except Exception:
         pass
     return False
+
+
+def session_log_path(session_id: str) -> str:
+    """返回会话日志文件 session.jsonl.zstd 的绝对路径 (可能不存在)."""
+    try:
+        project = board_root().parent
+        seg = str(project).strip().rstrip("/").lstrip("/").replace("/", "-").replace("\\", "-")
+        dsh_home = os.environ.get("DSH_HOME") or os.path.expanduser("~/.dsh")
+        return os.path.join(dsh_home, "sessions", f"--{seg}--", session_id, "session.jsonl.zstd")
+    except Exception:
+        return ""
+
+
+def session_last_activity(session_id: str) -> float:
+    """会话日志 mtime (秒); 文件不存在或异常返回 0. 用于探测卡死 (进程在跑但日志长时间无更新)."""
+    try:
+        p = session_log_path(session_id)
+        if p and os.path.isfile(p):
+            return os.path.getmtime(p)
+    except Exception:
+        pass
+    return 0.0
+
+
+def session_stale(session_id: str, stale_secs: float = 900) -> bool:
+    """判定会话是否卡死: 进程在跑, 但会话日志超过 stale_secs 无更新 (默认 15 分钟).
+    常用于模型限流 429 空转等场景: 进程还挂着, 却毫无进展."""
+    if not session_id or not _session_running(session_id):
+        return False
+    mt = session_last_activity(session_id)
+    if not mt:
+        return False  # 拿不到日志, 保守不判卡死
+    return (time.time() - mt) > stale_secs
 
 
 def _tmux_window_index(win: str):
@@ -2265,6 +2405,8 @@ def cmd_move(args) -> int:
         raise KanbanError(f"非法迁移: {cur} -> {state} (允许: {'/'.join(allowed[cur]) or '无'})")
     if state == "done":
         text = read_card(entry)
+        # 归正: `completed <尾随说明>` -> 严格 completed, 说明搬进「完成总结」, 再走严格校验
+        text = normalize_result_field(text)
         if not re.search(r"^- 结果:\s*completed\s*$", text, re.M):
             raise KanbanError("进 done 前须填 `结果: completed`")
         summary = section_body(text, "完成总结")
@@ -2587,6 +2729,13 @@ def cmd_check(args) -> int:
                 and read_any_text(entry / "report.md").strip()
             if not summary_ok and not report_ok:
                 problems.append(f"[done] {task_id} 缺「完成总结」或 report.md")
+        # 结果/工作结果字段禁止尾随说明 (必须严格 completed 或留空; 说明放「完成总结」)
+        for fld in ("结果", "工作结果"):
+            for m in re.finditer(rf"^- {fld}:\s*completed[ \t]+(\S.*)$", text, re.M):
+                tail = m.group(1).strip()[:40]
+                problems.append(
+                    f"[{state}] {task_id} `{fld}:` 后带尾随说明 `{tail}...`"
+                    f" (只允许严格 completed; 说明请移入「完成总结」)")
     problems += validate_groups(root)
     if problems:
         print("看板存在问题:")
@@ -2805,7 +2954,59 @@ def cmd_auto(args) -> int:
                         r"(^- 验收:\s*.*$)", r"\1\n- 阶段: 待验收", text, count=1, flags=re.M)
                     write_entry(e, text)
         wc = _count_working()
-        # 每次轮询先扫描全部 working 卡: 会话中断(有会话记录但无 dsh 进程)自动恢复
+        # 每次轮询先扫描全部 working 卡恢复: ① 带「- 暂停:」标记的卡优先 (即使进程在跑,
+        # 也视为卡死/暂停, kill 后重启续跑, 清标记); ② 普通中断 (有会话记录但无 dsh 进程) 恢复。
+        # 恢复循环先于下方 start 新卡循环, 保证「优先续停下的任务, 没有再开新」。
+        paused = [e for s, e in iter_entries(root)
+                  if s == "working" and pause_reason(read_card(e))]
+        for e in paused:
+            tid = entry_id(e)
+            try:
+                text = read_card(e)
+                if is_work_completed(text):
+                    continue  # 已实施完成, 不当作暂停任务恢复
+                m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+                sid = m.group(1).strip() if m else ""
+                if sid and _session_running(sid):
+                    kill_session(sid)
+                    print(f"[{now()}] 暂停任务 {tid}: kill 卡死会话 {sid}")
+                print(f"[{now()}] 优先恢复暂停任务 {tid}"
+                      + (f" (原因: {pause_reason(text)})" if pause_reason(text) else ""))
+                try:
+                    cmd_resume([tid])   # 成功后 cmd_resume 内部会清暂停标记
+                except KanbanError as exc:
+                    print(f"[{now()}] resume {tid} 失败: {exc}")
+            except Exception as exc:
+                print(f"[{now()}] 检查 {tid} 会话状态失败: {exc}")
+        # ② 自动探测「进程在跑但会话日志长时间无更新」的卡死会话 (如模型限流 429 空转):
+        #    自动打暂停标记 -> kill -> resume 续跑。阈值由 stale_secs 控制 (默认 15 分钟)。
+        for s, e in iter_entries(root):
+            if s != "working":
+                continue
+            tid = entry_id(e)
+            try:
+                text = read_card(e)
+                if is_work_completed(text):
+                    continue
+                if pause_reason(text):
+                    continue  # 已在上面优先处理
+                m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
+                sid = m.group(1).strip() if m else ""
+                if sid and session_stale(sid, stale_secs=900):
+                    # 节流: 同一卡若在 throttle 秒内刚被自动重启过, 跳过, 避免无限 kill/resume 轰炸
+                    last = _STALE_HANDLED.get(tid, 0.0)
+                    if time.time() - last < _STALE_THROTTLE:
+                        continue
+                    _STALE_HANDLED[tid] = time.time()
+                    print(f"[{now()}] 探测到卡死会话 {tid} ({sid}): 日志长时间无更新, 自动暂停并重启")
+                    write_entry(e, set_pause(text, "自动探测: 会话日志长时间无更新(疑似模型限流/卡死)"))
+                    kill_session(sid)
+                    try:
+                        cmd_resume([tid])
+                    except KanbanError as exc:
+                        print(f"[{now()}] resume {tid} 失败: {exc}")
+            except Exception as exc:
+                print(f"[{now()}] 检查 {tid} 卡死状态失败: {exc}")
         for s, e in iter_entries(root):
             if s != "working":
                 continue
@@ -2814,6 +3015,8 @@ def cmd_auto(args) -> int:
                 text = read_card(e)
                 if is_work_completed(text):
                     continue  # 实施已经结束，人工验收卡不应被 auto 当成中断会话恢复。
+                if pause_reason(text):
+                    continue  # 暂停卡已在上面优先处理
                 m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
                 if m and not _session_running(m.group(1).strip()):
                     print(f"[{now()}] 恢复中断会话 {tid} ({m.group(1)})")
@@ -3025,6 +3228,8 @@ def main(argv) -> int:
             return cmd_start(args)
         if cmd == "resume":
             return cmd_resume(args)
+        if cmd == "pause":
+            return cmd_pause(args)
         if cmd == "move":
             return cmd_move(args)
         if cmd == "group":
