@@ -101,6 +101,7 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 | `kanban new [--large] [--group] [--deps] [--review light\|standard\|full] [--spec-file <需求> --req REQ-xxx] <kind> <slug> <标题>` | 建卡;`--spec-file requirements --req REQ-P-001` 自动导入需求契约(描述→目标、验收→验收条件、范围、类型/模块) |
 | `kanban list [state] [--type t] [--module m]` | 列卡;按需求类型/模块筛选 |
 | `kanban show <task-id>` / `kanban check` | 看卡 / 校验全部入口 |
+| `kanban stage <id> <阶段>` | 设置卡片**审核阶段标签**(列内标签,不新增状态目录): `实施中` / `待审核` / `审核中:PM` / `审核中:QA` / `审核中:CSA` / `审核中:Hacker` / `待验收` / `已验收`; `kanban list` 在 working/done 列显示标签, 一眼看到进度到哪一步 |
 | `kanban pick <id>` → `kanban start <id>` | backlog → todo → working 并拉起独立 DSH 会话(`kb-<task-id>`) |
 | `kanban move <id> <state>` / `kanban resume <id>` | 迁移状态 / 崩溃后续跑 |
 | `kanban req-status [requirements] [--type] [--module]` | 需求 ↔ 看板核对 |
@@ -117,6 +118,8 @@ Agent 会:分析需求 → 给你三选一(走看板 / 本会话直接做 / 调�
 - **`work`(默认)**: 前置任务"**工作已完成**"即放行下一个 — `done` 或(`working` 且 `工作结果: completed` = 到达等待验收)。卡片用 `验收: 人工|自动` 标记策略：人工任务保留在 working 等确认但不占并发位，自动任务由 auto 自动迁入 done。
 - **`done`**: 前置必须进入 `done`(已确认验收) 才开下一个。
 - 依赖来源优先级: `--deps` 显式 map(`slug=dep1,dep2;...`) > `--chain` 线性(每个依赖之前所有) > 卡片「前置任务」。
+
+**审核阶段标签**(列内标签,不新增状态目录): 卡片头部 `- 阶段:` 记录当前进度, `kanban list` 在 working/done 列显示 `<阶段>`, 一眼看到每张卡走到哪一步。取值 `实施中`→`待审核`→`审核中:PM/QA/CSA/Hacker`→`待验收`→`已验收`; 执行 Agent 用 `kanban stage <id> <阶段>` 推进。旧卡无字段时 `kanban list` 自动推断(`工作结果: completed`=待验收, done=已验收), auto 也会同步写入。
 
 前端任务验收分 **L0-L5** 五级:L0 静态断言 / L1 JS 逻辑 / L2 接口联调 在卡内由 Agent 完成;
 **L3 浏览器 E2E**(`kanban e2e`)、**L4 视觉回归**(`kanban visual`)独立执行;**L5 视觉还原**

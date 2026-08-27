@@ -53,6 +53,8 @@ USAGE = """用法:
   kanban design break <REQ-ID>           AI 语义拆分需求为多张任务卡 (数量由 AI 定; 子卡引用父需求)
   kanban list [state] [--mobile] [--type t] [--module m]  列出卡片 (默认全部状态; 大任务标 [large])
   kanban show <task-id>                    显示卡片 (大任务: spec + plan + report)
+  kanban stage <task-id> <阶段>            设置卡片审核阶段标签 (实施中|待审核|审核中:PM|审核中:QA|
+                                            审核中:CSA|审核中:Hacker|待验收|已验收; 列内标签不新增状态目录)
   kanban new [--large] [--group <gid>] [--deps id1,id2] [--review light|standard|full] [--spec-file <需求文档|需求仓库> --req REQ-xxx] <feature|bug|chore|research> <slug> <标题...>
   kanban req-status [需求文档|需求仓库] [--type t] [--module m]  核对需求条目与看板卡状态
   kanban e2e <task-id>                  L3 浏览器 E2E (独立阶段)
@@ -253,6 +255,23 @@ def is_work_completed(text: str) -> bool:
     )
 
 
+# 审核阶段标签 (列内标签, 不新增状态目录; 执行 Agent 用 `kanban stage <id> <阶段>` 更新)
+PHASES = ("实施中", "待审核", "审核中:PM", "审核中:QA", "审核中:CSA", "审核中:Hacker", "待验收", "已验收")
+_PHASE_MARKER = re.compile(r"^- 阶段:\s*([^\r\n]*)$", re.M)
+
+
+def card_phase(text: str, state: str = "") -> str:
+    """读取卡片阶段标签; 旧卡缺字段时按已有结果字段推断 (不落盘)."""
+    m = _PHASE_MARKER.search(text)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    if re.search(r"^- 结果:\s*completed\s*$", text, re.M) or state == "done":
+        return "已验收"
+    if is_work_completed(text):
+        return "待验收"
+    return "实施中"
+
+
 def template_card(title: str, kind: str) -> str:
     return f"""# {title}
 
@@ -264,6 +283,7 @@ def template_card(title: str, kind: str) -> str:
 - 任务分支:
 - 审核: 标准
 - 验收: 人工
+- 阶段: 实施中
 - 工作结果:
 - 结果:
 
@@ -1151,15 +1171,19 @@ def cmd_list(args) -> int:
                 m = re.search(r"^- (开始时间|完成时间):\s*(.+)$", text, re.M)
                 ts = m.group(2).strip() if m else ""
                 mark = " [large]" if large else ""
-                rows.append((entry_id(entry), card_title(text), t + mark, ts))
+                rows.append((entry_id(entry), card_title(text), t + mark, ts, card_phase(text, state)))
         if not rows:
             continue
         print(f"[{state}] ({len(rows)})")
-        for task_id, title, t, ts in rows:
+        for task_id, title, t, ts, phase in rows:
+            # 只对 working/done 卡显示阶段标签, 让进度一眼可见 (列内标签, 不新增状态目录)
+            tag = ""
+            if state in ("working", "done") and phase:
+                tag = f"  <{phase}>"
             if mobile:
-                print(f"  {task_id}  {title} [{t}] {ts}")
+                print(f"  {task_id}  {title} [{t}]{tag} {ts}")
             else:
-                print(f"  {task_id}  {title}  [{t}] {ts}")
+                print(f"  {task_id}  {title}  [{t}]{tag} {ts}")
     return 0
 
 
@@ -1169,6 +1193,41 @@ def cmd_show(args) -> int:
     root = board_root()
     _, entry = find_card(root, args[0])
     dump_card(entry)
+    return 0
+
+
+def cmd_stage(args) -> int:
+    """设置卡片审核阶段标签 (列内标签, 不新增状态目录)。
+
+    用法: kanban stage <task-id> <阶段>
+    阶段: 实施中 | 待审核 | 审核中:PM | 审核中:QA | 审核中:CSA | 审核中:Hacker | 待验收 | 已验收
+    执行 Agent 在实现/审核/验收各环节推进时调用, 让 kanban list 一眼可见进度。
+    """
+    if len(args) != 2:
+        raise KanbanError("kanban stage 需要 <task-id> <阶段>")
+    root = board_root()
+    tid, phase = args[0], args[1].strip()
+    _, entry = find_card(root, tid)
+    phase = phase.replace(" ", "")
+    if phase not in PHASES:
+        raise KanbanError(
+            f"未知阶段: {phase} (可选: {' / '.join(PHASES)})"
+        )
+    text = read_card(entry)
+    if _PHASE_MARKER.search(text):
+        new_text = _PHASE_MARKER.sub(f"- 阶段: {phase}", text, count=1)
+    else:
+        # 旧卡无阶段字段: 在「审核」字段后补一行 (保持头部字段集中)
+        new_text = re.sub(
+            r"(^- 验收:\s*.*$)",
+            r"\1\n- 阶段: " + phase,
+            text, count=1, flags=re.M,
+        )
+    if new_text == text:
+        print(f"阶段已是 {phase}: {tid}")
+        return 0
+    write_entry(entry, new_text)
+    print(f"{tid} 阶段: {phase}")
     return 0
 
 
@@ -2725,11 +2784,26 @@ def cmd_auto(args) -> int:
                 try:
                     # 自动验收显式把实施完成提升为最终验收完成，再复用原有 done 校验。
                     text = re.sub(r"^- 结果:\s*.*$", "- 结果: completed", text, count=1, flags=re.M)
+                    if not _PHASE_MARKER.search(text):
+                        text = re.sub(
+                            r"(^- 验收:\s*.*$)", r"\1\n- 阶段: 已验收", text, count=1, flags=re.M)
+                    else:
+                        text = _PHASE_MARKER.sub("- 阶段: 已验收", text, count=1)
                     write_entry(e, text)
                     cmd_move([tid, "done"])
                     print(f"[{now()}] 自动验收 {tid} -> done")
                 except KanbanError as exc:
                     print(f"[{now()}] 自动验收 {tid} 暂不能收口: {exc}")
+        # 人工待验收卡: 同步阶段标签为 待验收 (不落盘则 list 会推断, 这里显式写入保持一致)
+        for s, e in list(iter_entries(root)):
+            if s != "working":
+                continue
+            text = read_card(e)
+            if is_work_completed(text) and card_phase(text, "working") == "待验收":
+                if not _PHASE_MARKER.search(text):
+                    text = re.sub(
+                        r"(^- 验收:\s*.*$)", r"\1\n- 阶段: 待验收", text, count=1, flags=re.M)
+                    write_entry(e, text)
         wc = _count_working()
         # 每次轮询先扫描全部 working 卡: 会话中断(有会话记录但无 dsh 进程)自动恢复
         for s, e in iter_entries(root):
@@ -2933,6 +3007,8 @@ def main(argv) -> int:
             return cmd_list(args)
         if cmd == "show":
             return cmd_show(args)
+        if cmd == "stage":
+            return cmd_stage(args)
         if cmd == "new":
             return cmd_new(args)
         if cmd == "req-status":
