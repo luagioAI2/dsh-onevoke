@@ -46,7 +46,7 @@ SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 # 进 todo/ 前必须非空且不留占位符的契约章节
 REQUIRED_SECTIONS = ("任务目标", "预期成果", "验收条件", "不在本轮范围")
-PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填", "填写")
+PLACEHOLDERS = ("<填写>", "<完成前留空>", "TODO", "TBD", "待填")
 
 USAGE = """用法:
   kanban init [path] [--agents]           幂等创建看板和 6 个状态目录; --agents 另给项目 AGENTS.md 写 opt-in 入口
