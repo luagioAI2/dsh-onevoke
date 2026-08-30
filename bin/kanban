@@ -1920,6 +1920,28 @@ def cmd_resume(args) -> int:
                 # 恢复成功则清暂停标记 (说明要跑了)
                 if pause_reason(text):
                     write_entry(entry, clear_pause(text))
+                # 等 TUI 就绪后注入"继续"指令, 否则恢复后停在 dsh > 等待输入, 任务不会自动续跑
+                # (auto 卡死探测 kill+resume 死循环的根因: resume 后无人注入继续指令)
+                target = f"{host}:{win}"
+                ready = False
+                for _ in range(40):
+                    time.sleep(2)
+                    cap = subprocess.run(
+                        ["tmux", "capture-pane", "-t", target, "-p"],
+                        capture_output=True, text=True, check=False, timeout=10,
+                    )
+                    if cap.returncode == 0 and ("dsh >" in cap.stdout or "dsh>" in cap.stdout):
+                        ready = True
+                        break
+                if ready:
+                    resume_msg = "继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。"
+                    subprocess.run(["tmux", "send-keys", "-t", target, "-l", resume_msg],
+                                   check=False, timeout=10)
+                    subprocess.run(["tmux", "send-keys", "-t", target, "Enter"],
+                                   check=False, timeout=10)
+                    print(f"已在 tmux window [{win}] 注入继续指令: {resume_msg}")
+                else:
+                    print(f"窗口 [{win}] 的 TUI 未就绪, 请手动粘贴: 继续按 onevoke 技能完成剩余步骤 (检查状态后继续)。")
                 continue
         print(f"请在新终端恢复任务会话:")
         print(f"  {launch_cmd}")
