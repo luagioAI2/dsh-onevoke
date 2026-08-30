@@ -261,6 +261,16 @@ def is_work_completed(text: str) -> bool:
     )
 
 
+def is_work_done(text: str) -> bool:
+    """实施是否已收口 (依赖门禁/并发计数/卡死探测用): 严格字段 completed,
+    或卡片阶段标签已推进到 待审核/待验收/已验收 (会话只推进阶段未写字段时也算完成,
+    避免流水线被空字段锁死; 见 is_work_completed)."""
+    if is_work_completed(text):
+        return True
+    m = _PHASE_MARKER.search(text)
+    return bool(m and m.group(1).strip() in ("待审核", "待验收", "已验收"))
+
+
 def pause_reason(text: str) -> str:
     """读取卡片 `- 暂停:` 标记 (无则为空)."""
     m = re.search(r"^- 暂停:[ \t]*(\S[^\r\n]*)$", text, re.M)
@@ -2921,7 +2931,7 @@ def cmd_auto(args) -> int:
             tid = slug_to_tid.get(slug)
             if tid:
                 _, entry = find_card_any(root, tid)
-                if entry and is_work_completed(read_card(entry)):
+                if entry and is_work_done(read_card(entry)):
                     return True
         return False
 
@@ -2930,7 +2940,7 @@ def cmd_auto(args) -> int:
         for s, e in iter_entries(root):
             if s != "working":
                 continue
-            if gate == "work" and is_work_completed(read_card(e)):
+            if gate == "work" and is_work_done(read_card(e)):
                 continue  # 已完成实施的卡片不占并发位；人工验收仍留 working
             n += 1
         return n
@@ -2950,7 +2960,7 @@ def cmd_auto(args) -> int:
             if s != "working":
                 continue
             text = read_card(e)
-            if acceptance_mode(text) == "自动" and is_work_completed(text):
+            if acceptance_mode(text) == "自动" and is_work_done(text):
                 tid = entry_id(e)
                 try:
                     # 自动验收显式把实施完成提升为最终验收完成，再复用原有 done 校验。
@@ -2985,7 +2995,7 @@ def cmd_auto(args) -> int:
             tid = entry_id(e)
             try:
                 text = read_card(e)
-                if is_work_completed(text):
+                if is_work_done(text):
                     continue  # 已实施完成, 不当作暂停任务恢复
                 m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
                 sid = m.group(1).strip() if m else ""
@@ -3008,8 +3018,8 @@ def cmd_auto(args) -> int:
             tid = entry_id(e)
             try:
                 text = read_card(e)
-                if is_work_completed(text):
-                    continue
+                if is_work_done(text):
+                    continue  # 已实施完成(含阶段已到待审核/待验收), 不再当卡死探测
                 if pause_reason(text):
                     continue  # 已在上面优先处理
                 m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
@@ -3035,8 +3045,8 @@ def cmd_auto(args) -> int:
             tid = entry_id(e)
             try:
                 text = read_card(e)
-                if is_work_completed(text):
-                    continue  # 实施已经结束，人工验收卡不应被 auto 当成中断会话恢复。
+                if is_work_done(text):
+                    continue  # 实施已经结束 (或阶段已到待审核/待验收), 人工验收卡不应被 auto 当成中断会话恢复。
                 if pause_reason(text):
                     continue  # 暂停卡已在上面优先处理
                 m = re.search(r"^会话:\s*(\S+)", section_body(text, "讨论与决策"), re.M)
